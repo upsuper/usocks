@@ -63,24 +63,29 @@ class RecordLayer(object):
         out_data = _hash(out_data) + out_data
         # encrypt & send data packet
         out_data = self.send_cipher.encrypt(out_data)
-        self.backend.send(out_data, True)
+        return self.backend.send(out_data, True)
 
     def _send_reset(self):
         padding_len = (block_size - header_size) % block_size
         padding = self.random.read(padding_len)
-        self._send_packet(b"", padding, PacketType.reset)
+        return self._send_packet(b"", padding, PacketType.reset)
 
     def _send_close(self):
         padding_len = (block_size - header_size) % block_size
         padding = self.random.read(padding_len)
-        self._send_packet(b"", padding, PacketType.close)
+        return self._send_packet(b"", padding, PacketType.close)
 
     def send_packet(self, data):
         data_len = len(data)
+        while data_len > 65535:    # the max size a packet can contain
+            new_len = 65532 # (65532 + header_size) % block_size == 0
+            self._send_packet(data[:new_len], b"", PacketType.data)
+            data = data[new_len:]
+            data_len -= new_len
         padding_len = data_len + header_size
         padding_len = (block_size - padding_len) % block_size
         padding = chr(padding_len) * padding_len
-        self._send_packet(data, padding, PacketType.data)
+        return self._send_packet(data, padding, PacketType.data)
 
     def _update_buffer(self):
         length = len(self.cipher_buf)
@@ -186,6 +191,9 @@ class RecordLayer(object):
         closing the backend.
         """
         self._send_close()
+
+    def continue_send(self):
+        return self.backend.continue_send()
 
     def fileno(self):
         return self.backend.fileno()

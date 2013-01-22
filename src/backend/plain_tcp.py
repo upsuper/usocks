@@ -1,6 +1,7 @@
 # coding: UTF-8
 
 import socket
+import errno
 
 DEFAULT_PORT = 4194
 
@@ -10,18 +11,37 @@ class PlainTCPBackend(object):
         self.send_buf = b""
 
     def send(self, data, urgent=True):
-        """send(data[, urgent]) --> None.
+        """send(data[, urgent]) --> Bool
 
         Send data. If urgent is set to False, data may not be sent
         immediately. It depends on backend when a non-urgent data
         will be sent. But anyway, all data will be sent sequentially.
+        The return value has the same meaning with continue_send.
         """
         if not urgent:
             self.send_buf += data
             return
-        data = self.send_buf + data
-        self.send_buf = b""
-        self.conn.sendall(data)
+        self.send_buf += data
+        return self.continue_send()
+
+    def continue_send(self):
+        """continue_send() --> Bool
+
+        Continue sending. Return True if all data in sending buffer
+        has been sent, False otherwise. Caller should call this method
+        until it returns True.
+        """
+        if self.send_buf:
+            try:
+                sent = self.conn.send(self.send_buf)
+            except socket.error as e:
+                if e.errno == errno.EWOULDBLOCK:
+                    sent = 0
+                else:
+                    raise
+            if sent:
+                self.send_buf = self.send_buf[sent:]
+        return not self.send_buf
 
     def recv(self):
         data = self.conn.recv(4096)
@@ -50,6 +70,7 @@ class ClientBackend(PlainTCPBackend):
         # initialize socket
         self.conn = socket.socket()
         self.conn.connect((self.server, self.port))
+        self.conn.setblocking(0)
 
 class ServerInstance(PlainTCPBackend):
 
@@ -57,6 +78,7 @@ class ServerInstance(PlainTCPBackend):
         super(ServerInstance, self).__init__()
         self.conn = conn
         self.address = address
+        self.conn.setblocking(0)
 
 class ServerBackend(object):
 
