@@ -10,26 +10,26 @@ class PlainTCPBackend(object):
     def __init__(self):
         self.send_buf = b""
 
-    def send(self, data, urgent=True):
+    def send(self, data=None, urgent=True):
         """send(data[, urgent]) --> Bool
 
         Send data. If urgent is set to False, data may not be sent
         immediately. It depends on backend when a non-urgent data
         will be sent. But anyway, all data will be sent sequentially.
-        The return value has the same meaning with continue_send.
+        The return value has the same meaning with _continue.
         """
-        if not urgent:
+        if data:
             self.send_buf += data
-            return
-        self.send_buf += data
-        return self.continue_send()
+        if not urgent:
+            return True
+        return self._continue()
 
-    def continue_send(self):
-        """continue_send() --> Bool
+    def _continue(self):
+        """_continue() --> Bool
 
-        Continue sending. Return True if all data in sending buffer
-        has been sent, False otherwise. Caller should call this method
-        until it returns True.
+        Continue sending. Return True if all urgent data in sending
+        buffer has been sent, False otherwise. Caller should call this
+        method until it returns True.
         """
         if self.send_buf:
             try:

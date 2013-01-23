@@ -192,8 +192,8 @@ class RecordLayer(object):
         """
         self._send_close()
 
-    def continue_send(self):
-        return self.backend.continue_send()
+    def continue_sending(self):
+        return self.backend.send()
 
     def fileno(self):
         return self.backend.fileno()
