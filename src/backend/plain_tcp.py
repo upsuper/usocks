@@ -50,6 +50,8 @@ class PlainTCPBackend(object):
         return data
 
     def close(self):
+        self.conn.setblocking(1)
+        # TODO make close non-blocking
         self.conn.close()
 
     def fileno(self):
@@ -69,6 +71,7 @@ class ClientBackend(PlainTCPBackend):
             self.port = opts['port']
         # initialize socket
         self.conn = socket.socket()
+        # TODO make connect non-blocking
         self.conn.connect((self.server, self.port))
         self.conn.setblocking(0)
 
