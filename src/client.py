@@ -113,11 +113,11 @@ class TunnelClient(object):
         conn = self.connections[conn_id]
         # server never sends syn flag at present
         # ack flag is set
-        if control & StatusControl.ack:
+        if control & StatusControl.dat:
             if not conn.send(packet):
                 self.unfinished.add(conn)
         # rst or fin flag is set
-        if control & (StatusControl.rst | StatusControl.fin):
+        if control & StatusControl.fin:
             self._close_connection(conn_id)
 
     def _close_connection(self, conn_id):
@@ -138,7 +138,7 @@ class TunnelClient(object):
         conn_id = conn.conn_id
         control = 0
         if data:
-            control = StatusControl.ack
+            control = StatusControl.dat
             if not conn.connected:
                 conn.connected = True
                 control |= StatusControl.syn

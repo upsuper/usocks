@@ -116,18 +116,18 @@ class TunnelServer(object):
             conns[conn_id] = frontend
             self.frontends[frontend] = conn_id, conn
         # ack flag is set
-        if control & StatusControl.ack:
+        if control & StatusControl.dat:
             if not conns[conn_id].send(packet):
                 self.unfinished.add(conns[conn_id])
         # rst or fin flag is set
-        if control & (StatusControl.rst | StatusControl.fin):
+        if control & StatusControl.fin:
             self._close_frontend(conns[conn_id])
 
     def _process_frontend(self, frontend):
         data = frontend.recv()
         control = 0
         if data:
-            control = StatusControl.ack
+            control = StatusControl.dat
         elif data is None:
             data = b""
             control = StatusControl.fin

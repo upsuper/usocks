@@ -27,6 +27,5 @@ def import_backend(config):
 
 class StatusControl(object):
     syn = 1 # first packet, means connection is started
-    ack = 2 # data transmission
-    rst = 4 # connection is resetted
-    fin = 8 # connection is closed
+    dat = 2 # data transmission
+    fin = 4 # connection is closed
