@@ -16,10 +16,10 @@ def _hash(data):
 
 class PacketType(object):
     data    = 1
-    nodata  = 2
-    reset   = 3
-    close   = 4
-    MAX     = 5
+    part    = 2
+    nodata  = 3
+    reset   = 254
+    close   = 255
 
 # Exceptions
 class CriticalException(Exception): pass
@@ -46,6 +46,8 @@ class RecordLayer(object):
         self.recv_synchornized = False
         self.header_arrived = False
         self.secure_closed = False
+        # part packet buffer
+        self.part_packet = b""
         # The first block must not contain any useful data or it will
         # never be recognized, so we send one block here. However,
         # it is only required to be received before the first data
@@ -79,7 +81,7 @@ class RecordLayer(object):
         data_len = len(data)
         while data_len > 65535:    # the max size a packet can contain
             new_len = 65532 # (65532 + header_size) % block_size == 0
-            self._send_packet(data[:new_len], b"", PacketType.data)
+            self._send_packet(data[:new_len], b"", PacketType.part)
             data = data[new_len:]
             data_len -= new_len
         padding_len = data_len + header_size
@@ -125,12 +127,22 @@ class RecordLayer(object):
                 # check if header is valid
                 if self.expected_length % block_size != 0:
                     raise InvalidHeaderError()
-                if self.packet_type != PacketType.data:
-                    if self.data_len != 0:
-                        raise InvalidHeaderError()
-                elif self.packet_type >= PacketType.MAX:
+                # check packet type
+                if self.packet_type == PacketType.data:
+                    pass
+                elif self.packet_type == PacketType.part:
+                    pass
+                elif self.data_len != 0:
+                    # packet whose type is neither data nor part
+                    # must not contain any data
                     raise InvalidHeaderError()
-                elif self.packet_type == 0:
+                elif self.packet_type == PacketType.nodata:
+                    pass
+                elif self.packet_type == PacketType.reset:
+                    pass
+                elif self.packet_type == PacketType.close:
+                    pass
+                else:
                     raise InvalidHeaderError()
 
             # check if the full packet is available
@@ -152,7 +164,12 @@ class RecordLayer(object):
                 raise RemoteResetException()
             elif self.packet_type == PacketType.close:
                 self.secure_closed = True
-            else:
+            elif self.packet_type == PacketType.part:
+                self.part_packet += data
+            elif self.packet_type == PacketType.data:
+                if self.part_packet:
+                    data = self.part_packet + data
+                    self.part_packet = b""
                 packets.append(data)
 
         return packets
