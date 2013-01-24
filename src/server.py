@@ -94,7 +94,7 @@ class TunnelServer(object):
                 self._process_packet(conn, packet)
 
     def _close_record_layer(self, conn):
-        for frontend in self.record_layers[conn].itervalues():
+        for frontend in self.record_layers[conn].values():
             self._close_frontend(frontend)
         del self.record_layers[conn]
         conn.close()
