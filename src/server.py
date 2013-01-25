@@ -5,18 +5,23 @@ from __future__ import print_function, unicode_literals
 
 import sys
 import yaml
+import errno
 import signal
 import socket
 import tunnel
 import select
 import getopt
 import logging
+import traceback
 
 from os import path
 from itertools import chain
+from functools import partial
+
+import record
+import frontend
 
 from util import ObjectSet, ObjectDict
-from record import RecordLayer
 from tunnel import StatusControl
 
 def import_frontend(config):
@@ -25,6 +30,14 @@ def import_frontend(config):
     package = __import__(package, fromlist=fromlist)
     FrontendServer = package.FrontendServer
     return lambda: FrontendServer(**config['frontend'])
+
+def log(level, msg, layer, client):
+    return logging.log(level, msg, extra={'layer': layer, 'client': client})
+debug    = partial(log, logging.DEBUG)
+info     = partial(log, logging.INFO)
+warning  = partial(log, logging.WARNING)
+error    = partial(log, logging.ERROR)
+critical = partial(log, logging.CRITICAL)
 
 class TunnelServer(object):
 
@@ -47,10 +60,17 @@ class TunnelServer(object):
     def run(self):
         self.running = True
         while self.running:
-            self._process()
+            try:
+                self._process()
+            except Exception as e:
+                msg = "unknown exception occurred: " + str(e)
+                error(msg, 'tunnel', None)
+                debug(''.join(traceback.format_stack()), 'tunnel', None)
         record_layers = self.record_layers.keys()
         for conn in record_layers:
-            self._close_record_layer(conn)
+            self._clean_record_layer(conn)
+            conn.close()
+            conn.backend.close()
         self.backend.close()
 
     def _process(self):
@@ -62,11 +82,14 @@ class TunnelServer(object):
         try:
             r, w, _ = select.select(rlist, wlist, [])
         except select.error as e:
-            return
+            if e[0] == errno.EINTR:
+                return
+            else:
+                raise
         for conn in r:
             if conn is self.backend:
                 self._process_backend()
-            elif isinstance(conn, RecordLayer):
+            elif isinstance(conn, record.RecordLayer):
                 self._process_record_layer(conn)
             else:
                 self._process_frontend(conn)
@@ -75,22 +98,46 @@ class TunnelServer(object):
 
     def _process_backend(self):
         inst = self.backend.accept()
-        record_layer = RecordLayer(self.key, inst)
+        record_layer = record.RecordLayer(self.key, inst)
         self.record_layers[record_layer] = {}
+        # log connection
+        info("connected", 'record', inst.address)
 
     def _process_record_layer(self, conn):
-        packets = conn.receive_packets()
+        try:
+            packets = conn.receive_packets()
+        except record.CriticalException as e:
+            self._clean_record_layer(conn)
+            conn.backend.close()
+
+            # logging message
+            if isinstance(e, record.HashfailError):
+                msg = "detect a wrong hash"
+            elif isinstance(e, record.InvalidHeaderError):
+                msg = "detect an invalid header"
+            elif isinstance(e, record.RemoteResetException):
+                msg = "remote host reset the connection"
+            elif isinstance(e, record.InsecureClosingError):
+                msg = "detect an insecure closing"
+            else:
+                msg = "detect a critical exception"
+            # log the exception
+            warning(msg, 'record', conn.backend.address)
+            return
+
         if packets is None:
-            self._close_record_layer(conn)
+            self._clean_record_layer(conn)
+            conn.close()
+            conn.backend.close()
+            info("disconnected", 'record', conn.backend.address)
         else:
             for packet in packets:
                 self._process_packet(conn, packet)
 
-    def _close_record_layer(self, conn):
-        for frontend in self.record_layers[conn].values():
-            self._close_frontend(frontend)
+    def _clean_record_layer(self, conn):
+        for front in self.record_layers[conn].values():
+            self._close_frontend(front)
         del self.record_layers[conn]
-        conn.close()
 
     def _close_frontend(self, front, reset=False):
         if reset:
@@ -112,9 +159,14 @@ class TunnelServer(object):
         if control & StatusControl.syn:
             if conn_id in conns:
                 self._close_frontend(conns[conn_id])
-            frontend = self.new_frontend()
-            conns[conn_id] = frontend
-            self.frontends[frontend] = conn_id, conn
+            try:
+                front = self.new_frontend()
+            except frontend.FrontendUnavailableError as e:
+                error(e.message, 'frontend', conn.backend.address)
+                self._send_packet(conn, conn_id, StatusControl.rst, b"")
+                return
+            conns[conn_id] = front
+            self.frontends[front] = conn_id, conn
         # ack flag is set
         if control & StatusControl.dat:
             if not conns[conn_id].send(packet):
@@ -123,24 +175,36 @@ class TunnelServer(object):
         if control & StatusControl.fin:
             self._close_frontend(conns[conn_id])
 
-    def _process_frontend(self, frontend):
-        data = frontend.recv()
+    def _send_packet(self, conn, conn_id, control, data):
+        header = tunnel.pack_header(control, conn_id)
+        if not conn.send_packet(header + data):
+            self.unfinished.add(conn)
+
+    def _process_frontend(self, front):
         control = 0
+        try:
+            data = front.recv()
+        except Exception as e:
+            _, conn = self.frontends[front]
+            msg = "unknown error: " + str(e)
+            error(msg, 'frontend', conn.backend.address)
+            data = b""
+            control = StatusControl.rst
         if data:
             control = StatusControl.dat
         elif data is None:
             data = b""
             control = StatusControl.fin
         if control:
-            conn_id, conn = self.frontends[frontend]
-            header = tunnel.pack_header(control, conn_id)
-            if not conn.send_packet(header + data):
-                self.unfinished.add(conn)
-            if control & StatusControl.fin:
-                self._close_frontend(frontend)
+            conn_id, conn = self.frontends[front]
+            self._send_packet(conn, conn_id, control, data)
+            if control & StatusControl.rst:
+                self._close_frontend(front, True)
+            elif control & StatusControl.fin:
+                self._close_frontend(front)
 
     def _process_sending(self, conn):
-        if isinstance(conn, RecordLayer):
+        if isinstance(conn, record.RecordLayer):
             is_finished = conn.continue_sending()
         else:
             is_finished = conn.send()
@@ -153,9 +217,9 @@ def usage():
 def main():
     try:
         opts, args = getopt.getopt(sys.argv[1:], "hc:vl:",
-                ["help", "config=", "verbose", "logfile"])
+                ["help", "config=", "verbose", "logfile="])
     except getopt.GetoptError as e:
-        print(str(err), file=sys.stderr)
+        print(str(e), file=sys.stderr)
         usage()
         sys.exit(2)
 
@@ -195,13 +259,25 @@ def main():
         print("cannot find client config", file=sys.stderr)
         sys.exit(1)
 
+    # initilize logging
+    if log_file and log_file != '-':
+        log_stream = open(log_file, "a")
+    else:
+        log_stream = sys.stdout
+    logging.basicConfig(
+            format="%(asctime)s [%(layer)s] " +
+                   "%(levelname)s: %(client)s %(message)s",
+            level=logging.INFO if not verbose else logging.DEBUG,
+            datefmt="%Y-%m-%d %H:%M:%S",
+            stream=log_stream)
+
     # initialize server
     server = TunnelServer(config['server'])
     # set signal handler
-    def handler(signum, frame):
+    def stop_handler(signum, frame):
         server.running = False
-    signal.signal(signal.SIGINT, handler)
-    signal.signal(signal.SIGTERM, handler)
+    signal.signal(signal.SIGINT, stop_handler)
+    signal.signal(signal.SIGTERM, stop_handler)
     # start server
     server.run()
     

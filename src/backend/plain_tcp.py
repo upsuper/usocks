@@ -57,7 +57,6 @@ class PlainTCPBackend(object):
     def fileno(self):
         return self.conn.fileno()
 
-
 class ClientBackend(PlainTCPBackend):
 
     server = "127.0.0.1"
@@ -101,7 +100,7 @@ class ServerBackend(object):
 
     def accept(self):
         conn, address = self.conn.accept()
-        return ServerInstance(conn, address)
+        return ServerInstance(conn, address[0])
 
     def close(self):
         self.conn.close()

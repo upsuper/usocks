@@ -3,6 +3,8 @@
 import errno
 import socket
 
+from . import FrontendUnavailableError
+
 class FrontendServer(object):
 
     server = "localhost"
@@ -16,7 +18,14 @@ class FrontendServer(object):
         
         # initialize socket
         self.conn = socket.socket()
-        self.conn.connect((self.server, self.port))
+        try:
+            self.conn.connect((self.server, self.port))
+        except socket.error as e:
+            if e.errno == errno.ECONNREFUSED:
+                msg = "connection to {0}:{1} is refused" \
+                        .format(self.server, self.port)
+                raise FrontendUnavailableError(msg)
+            raise
         self.conn.setblocking(0)
         self.send_buf = b""
 
