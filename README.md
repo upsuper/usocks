@@ -44,7 +44,44 @@ be virtually regarded as being linked to the frontend. At present,
 the implementation only includes the simplest frontend which redirects
 connections to a given network address.
 
+## Requirement
+
+usocks, the implementation, requires Python 2.6.x or 2.7.x with the
+following packages:
+
+* [pycrypto](https://www.dlitz.net/software/pycrypto/)
+* [PyYAML](http://pyyaml.org/)
+
+These two packages can be installed via `easy_install` or `pip`.
+
+## Usage
+
+### Configuration
+
+You need to rename `src/config.sample.yaml` to `src/config.yaml` and
+modify the options first for any usage. There are two main parts of
+the config file: `client` and `server`. Putting them together enables
+the config file to be shared among two sides. Generally speaking, the
+only four fields you need to change are `client/backend/server`,
+`client/backend/port`, `client/key`, and `client/port`. Follow the
+comments to adjust it.
+
+### Use as Proxy
+
+Since there is no SOCKS server implementation included in usocks, you
+have to setup an independent proxy server first,
+such as [Dante](http://www.inet.no/dante/).
+
+When the SOCKS server has been configured properly, you should set
+`server/frontend/port` to the port it listens, so that usocks is able
+to redirect traffic to the SOCKS server.
+
+Finally execute `./server.py` on server, `./client.py` on client, and
+setup applications to use the port as SOCKS server.
+
 ## Todo
 
 * Provide a mechanism to enable backends to exchange data with its
   counterpart, so that more complicated backends can be implemented.
+* Enable server to establish connections.
+* Implement a simple SOCKSv5 server as a frontend.
