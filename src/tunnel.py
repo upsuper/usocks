@@ -12,18 +12,18 @@ Packet Structure:
      0                   1                   2                   3
      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    |               |S|D|F|         |                               |
-    |    Version    |Y|A|I|         |         Connection ID         |
-    |               |N|T|N|         |                               |
+    |               |S|D|F|R|       |                               |
+    |    Version    |Y|A|I|S|       |         Connection ID         |
+    |               |N|T|N|T|       |                               |
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
     Version         8-bit version number = 1.
 
-    Control bits    3-bit flags. See Connection Procedure.
+    Control bits    4-bit flags. See Connection Procedure.
 
-    Reserved        5 bits reserved for future use. Must be zero.
+    Reserved        4 bits reserved for future use. Must be zero.
 
-    Connection ID   16-bit connection id which is used for identifying
+    Connection ID   16-bit Connection ID which is used for identifying
                     connections. This id must be unique for each
                     connection in its lifetime, but may be reused
                     after one has been closed.
@@ -48,10 +48,17 @@ Connection Procedure:
     All packets with data have DAT flag set. Since a packet should
     make sense, no packet should be sent without any of the flag set.
 
-    The three flags are not exclusive, one packet may have any
-    combination of the three flags set. If more than one flag is set,
-    SYN flag is the first one to be processed, followed by DAT, and
-    FIN is the last.
+    The three flags mentioned above are not exclusive, one packet may
+    have any combination of the three flags set (except none of them).
+    If more than one flag is set, SYN flag is the first one to be
+    processed, followed by DAT, and FIN is the last.
+
+    If there is a critical error occurs in frontend, or the outside
+    connection is resetted, a packet with RST flag alone should be
+    sent. Receiving this packet, client should reset the connection,
+    or server should reset the frontend, respectively. This flag
+    also indicates that the connection is able to be released, and
+    the Connection ID is available for allocating again.
 
 """
 
@@ -84,3 +91,4 @@ class StatusControl(object):
     syn = 1 # first packet, means connection is started
     dat = 2 # data transmission
     fin = 4 # connection is closed
+    rst = 8 # connection is resetted

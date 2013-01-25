@@ -26,9 +26,6 @@ class Connection(object):
         self.conn = conn
         self.conn_id = conn_id
         self.connected = False
-        self.recv = conn.recv
-        self.close = conn.close
-        self.fileno = conn.fileno
         # initialize non-blocking sending
         self.conn.setblocking(0)
         self.send_buf = b""
@@ -48,6 +45,9 @@ class Connection(object):
         if sent:
             self.send_buf = self.send_buf[sent:]
         return not self.send_buf
+
+    def __getattr__(self, name):
+        return getattr(self.conn, name)
 
 class TunnelClient(object):
 
@@ -108,6 +108,9 @@ class TunnelClient(object):
     def _process_packet(self, packet):
         control, conn_id, packet = tunnel.unpack_packet(packet)
         conn = self.connections[conn_id]
+        if control & StatusControl.rst:
+            self._close_connection(conn_id, True)
+            return
         # server never sends syn flag at present
         # ack flag is set
         if control & StatusControl.dat:
@@ -117,8 +120,12 @@ class TunnelClient(object):
         if control & StatusControl.fin:
             self._close_connection(conn_id)
 
-    def _close_connection(self, conn_id):
-        self.connections[conn_id].close()
+    def _close_connection(self, conn_id, reset=False):
+        conn = self.connections[conn_id]
+        if reset:
+            conn.setsockopt(socket.SOL_SOCKET,
+                    socket.SO_LINGER, b"\1\0\0\0\0\0\0\0")
+        conn.close()
         del self.connections[conn_id]
         self.available_conn_id.append(conn_id)
 
@@ -131,16 +138,23 @@ class TunnelClient(object):
         self.connections[conn_id] = conn
 
     def _process_connection(self, conn):
-        data = conn.recv(4096)
         conn_id = conn.conn_id
         control = 0
+        try:
+            data = conn.recv(4096)
+        except socket.error as e:
+            if e.errno == errno.ECONNRESET:
+                control = StatusControl.rst
+                data = b""
+            else:
+                raise
         if data:
             control = StatusControl.dat
             if not conn.connected:
                 conn.connected = True
                 control |= StatusControl.syn
         else:
-            if conn.connected:
+            if conn.connected and not control:
                 control = StatusControl.fin
             self._close_connection(conn_id)
         # send packet

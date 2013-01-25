@@ -92,15 +92,22 @@ class TunnelServer(object):
         del self.record_layers[conn]
         conn.close()
 
-    def _close_frontend(self, frontend):
-        frontend.close()
-        conn_id, conn = self.frontends[frontend]
-        del self.frontends[frontend]
+    def _close_frontend(self, front, reset=False):
+        if reset:
+            front.reset()
+        else:
+            front.close()
+        conn_id, conn = self.frontends[front]
+        del self.frontends[front]
         del self.record_layers[conn][conn_id]
 
     def _process_packet(self, conn, packet):
         control, conn_id, packet = tunnel.unpack_packet(packet)
         conns = self.record_layers[conn]
+        # rst flag is set
+        if control & StatusControl.rst:
+            self._close_frontend(conns[conn_id], True)
+            return
         # syn flag is set
         if control & StatusControl.syn:
             if conn_id in conns:

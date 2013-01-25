@@ -47,5 +47,10 @@ class FrontendServer(object):
     def close(self):
         self.conn.close()
 
+    def reset(self):
+        self.conn.setsockopt(socket.SOL_SOCKET,
+                socket.SO_LINGER, b"\1\0\0\0\0\0\0\0")
+        self.conn.close()
+
     def fileno(self):
         return self.conn.fileno()
