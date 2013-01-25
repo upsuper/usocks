@@ -1,25 +1,18 @@
 #!/usr/bin/env python
 # coding: UTF-8
 
-CONFIG = {
-        'backend': {
-            'type': "plain_tcp",
-            'port': 4096
-            },
-        'frontend': {
-            'type': "redirect",
-            'server': "localhost",
-            'port': 80
-            },
-        'key': "preshared_key",
-        }
+from __future__ import print_function, unicode_literals
 
+import sys
+import yaml
 import signal
 import socket
 import tunnel
 import select
+import getopt
 import logging
 
+from os import path
 from itertools import chain
 
 from util import ObjectSet, ObjectDict
@@ -147,13 +140,63 @@ class TunnelServer(object):
         if is_finished:
             self.unfinished.remove(conn)
 
-if __name__ == '__main__':
-    
-    server = TunnelServer(CONFIG)
+def usage():
+    pass
 
+def main():
+    try:
+        opts, args = getopt.getopt(sys.argv[1:], "hc:vl:",
+                ["help", "config=", "verbose", "logfile"])
+    except getopt.GetoptError as e:
+        print(str(err), file=sys.stderr)
+        usage()
+        sys.exit(2)
+
+    # parse opts
+    config_file = None
+    log_file = None
+    verbose = False
+    for o, a in opts:
+        if o in ("-v", "--verbose"):
+            verbose = True
+        elif o in ("-h", "--help"):
+            usage()
+            sys.exit()
+        elif o in ("-c", "--config"):
+            config_file = a
+        elif o in ("-l", "--logfile"):
+            log_file = a
+        else:
+            assert False, "unhandled option"
+
+    # load config file
+    if config_file is None:
+        possible_files = [
+                path.abspath("./config.yaml"),
+                path.expanduser("~/.usocks.yaml"),
+                "/etc/usocks.yaml",
+                ]
+        for f in possible_files:
+            if path.exists(f):
+                config_file = f
+                break
+        else:
+            print("cannot find config file", file=sys.stderr)
+            sys.exit(2)
+    config = yaml.load(open(config_file, "r"))
+    if 'server' not in config:
+        print("cannot find client config", file=sys.stderr)
+        sys.exit(1)
+
+    # initialize server
+    server = TunnelServer(config['server'])
+    # set signal handler
     def handler(signum, frame):
         server.running = False
     signal.signal(signal.SIGINT, handler)
     signal.signal(signal.SIGTERM, handler)
-
+    # start server
     server.run()
+    
+if __name__ == '__main__':
+    main()

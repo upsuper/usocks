@@ -1,23 +1,19 @@
 #!/usr/bin/env python
 # coding: UTF-8
 
-CONFIG = {
-        'backend': {
-            'type': "plain_tcp",
-            'server': "localhost",
-            'port': 4096
-            },
-        'key': "preshared_key",
-        'port': 8080
-        }
+from __future__ import print_function, unicode_literals
 
+import sys
+import yaml
 import errno
 import socket
 import signal
 import tunnel
 import select
+import getopt
 import logging
 
+from os import path
 from itertools import chain
 
 from util import ObjectSet
@@ -57,13 +53,14 @@ class TunnelClient(object):
 
     def __init__(self, config):
 
-        Backend = tunnel.import_backend(config).ClientBackend
-        self.backend = Backend(**config['backend'])
-        self.record_layer = RecordLayer(config['key'], self.backend)
         # initialize local port
         self.local = socket.socket()
         self.local.bind(("", config['port']))
         self.local.listen(10)
+        # initialize backend & record layer
+        Backend = tunnel.import_backend(config).ClientBackend
+        self.backend = Backend(**config['backend'])
+        self.record_layer = RecordLayer(config['key'], self.backend)
         # initialize connection dict
         self.connections = {
                 tunnel.max_conn_id + 1: self.record_layer,
@@ -161,13 +158,59 @@ class TunnelClient(object):
         if is_finished:
             self.unfinished.remote(conn)
 
-if __name__ == '__main__':
-    
-    client = TunnelClient(CONFIG)
+def usage():
+    pass
 
+def main():
+    try:
+        opts, args = getopt.getopt(sys.argv[1:], "hc:v",
+                ["help", "config=", "verbose"])
+    except getopt.GetoptError as e:
+        print(str(err), file=sys.stderr)
+        usage()
+        sys.exit(2)
+
+    # parse opts
+    config_file = None
+    verbose = False
+    for o, a in opts:
+        if o in ("-v", "--verbose"):
+            verbose = True
+        elif o in ("-h", "--help"):
+            usage()
+            sys.exit()
+        elif o in ("-c", "--config"):
+            config_file = a
+        else:
+            assert False, "unhandled option"
+
+    # load config file
+    if config_file is None:
+        possible_files = [
+                path.abspath("./config.yaml"),
+                path.expanduser("~/.usocks.yaml"),
+                ]
+        for f in possible_files:
+            if path.exists(f):
+                config_file = f
+                break
+        else:
+            print("cannot find config file", file=sys.stderr)
+            sys.exit(2)
+    config = yaml.load(open(config_file, "r"))
+    if 'client' not in config:
+        print("cannot find client config", file=sys.stderr)
+        sys.exit(1)
+
+    # initialize client
+    client = TunnelClient(config['client'])
+    # set signal handler
     def handler(signum, frame):
         client.running = False
     signal.signal(signal.SIGINT, handler)
     signal.signal(signal.SIGTERM, handler)
-
+    # start client
     client.run()
+
+if __name__ == '__main__':
+    main()

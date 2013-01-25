@@ -1,0 +1,23 @@
+---
+client:
+
+  backend:  &backend
+    type: plain_tcp
+    server: remotehost  # change this to the server address
+    port: 4194
+
+  key: &key
+    preshared_key
+  port: 1080  # local port
+    
+server:
+
+  backend:  *backend
+
+  frontend:
+    type: redirect
+    server: localhost
+    port: 1080  # target port
+
+  key: *key
+
