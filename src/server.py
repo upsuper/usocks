@@ -41,6 +41,10 @@ warning  = partial(log, logging.WARNING)
 error    = partial(log, logging.ERROR)
 critical = partial(log, logging.CRITICAL)
 
+class FakeFrontend(object):
+    def close(): pass
+    def reset(): pass
+
 class TunnelServer(object):
 
     def __init__(self, config):
@@ -48,8 +52,12 @@ class TunnelServer(object):
         self.backend = Backend(**config['backend'])
         self.new_frontend = import_frontend(config)
         self.key = config['key']
-        # initialize connections waiting for sending
+        # initialize objectsets
+        # connections waiting for sending
         self.unfinished = ObjectSet()
+        # frontends has been resetted or closed, and waiting to be released
+        self.resetted_frontend = ObjectSet()
+        self.closed_frontend = ObjectSet()
         # record layers dictionary, in which values are dictionaries
         # of the connections belong to it.
         self.record_layers = ObjectDict()
@@ -80,7 +88,9 @@ class TunnelServer(object):
         rlist = list(chain(
             (self.backend, ),
             self.record_layers.iterkeys(),
-            self.frontends.iterkeys()))
+            (f for f in self.frontends.iterkeys()
+                if f not in self.closed_frontend and
+                   f not in self.resetted_frontend)))
         wlist = list(self.unfinished)
         try:
             r, w, _ = select.select(rlist, wlist, [])
@@ -156,7 +166,12 @@ class TunnelServer(object):
         conns = self.record_layers[conn]
         # rst flag is set
         if control & StatusControl.rst:
-            self._close_frontend(conns[conn_id], True)
+            front = conns[conn_id]
+            self._close_frontend(front, True)
+            if front in self.resetted_frontend:
+                self.resetted_frontend.remove(front)
+            else:
+                self._send_packet(conn, conn_id, StatusControl.rst)
             return
         # syn flag is set
         if control & StatusControl.syn:
@@ -166,7 +181,9 @@ class TunnelServer(object):
                 front = self.new_frontend()
             except frontend.FrontendUnavailableError as e:
                 error(e.message, 'frontend', conn.backend.address)
-                self._send_packet(conn, conn_id, StatusControl.rst, b"")
+                front = FakeFrontend()
+                self.resetted_frontend.add(front)
+                self._send_packet(conn, conn_id, StatusControl.rst)
                 return
             conns[conn_id] = front
             self.frontends[front] = conn_id, conn
@@ -176,9 +193,14 @@ class TunnelServer(object):
                 self.unfinished.add(conns[conn_id])
         # rst or fin flag is set
         if control & StatusControl.fin:
-            self._close_frontend(conns[conn_id])
+            front = conns[conn_id]
+            self._close_frontend(front)
+            if front in self.closed_frontend:
+                self.closed_frontend.remove(front)
+            else:
+                self._send_packet(conn, conn_id, StatusControl.fin)
 
-    def _send_packet(self, conn, conn_id, control, data):
+    def _send_packet(self, conn, conn_id, control, data=b""):
         header = tunnel.pack_header(control, conn_id)
         if not conn.send_packet(header + data):
             self.unfinished.add(conn)
@@ -202,9 +224,9 @@ class TunnelServer(object):
             conn_id, conn = self.frontends[front]
             self._send_packet(conn, conn_id, control, data)
             if control & StatusControl.rst:
-                self._close_frontend(front, True)
+                self.resetted_frontend.add(front)
             elif control & StatusControl.fin:
-                self._close_frontend(front)
+                self.closed_frontend.add(front)
 
     def _process_sending(self, conn):
         if isinstance(conn, record.RecordLayer):

@@ -42,8 +42,11 @@ Connection Procedure:
     half should close the old frontend first.
 
     When either side closes the connection, the corresponding half
-    sends a packet with FIN set. Who receives "FIN" packet can close
-    its connection without replying anything.
+    sends a packet with FIN set. The half who did not sent a FIN
+    packet must reply it with FIN set as well, and then closes its
+    connection. The initial sender can recycle the resources of
+    connection only when it receives the reply. In a word, resources
+    are released as soon as a packet with FIN is received.
 
     All packets with data have DAT flag set. Since a packet should
     make sense, no packet should be sent without any of the flag set.
@@ -58,7 +61,9 @@ Connection Procedure:
     sent. Receiving this packet, client should reset the connection,
     or server should reset the frontend, respectively. This flag
     also indicates that the connection is able to be released, and
-    the Connection ID is available for allocating again.
+    the Connection ID is available for allocating again. But like
+    FIN flag, receiver must reply a RST packet, and all connection
+    resources are released only after a packet with RST is received.
 
 """
 

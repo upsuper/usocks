@@ -26,11 +26,15 @@ class Connection(object):
         self.conn = conn
         self.conn_id = conn_id
         self.connected = False
+        self.closed = False
+        self.resetted = False
         # initialize non-blocking sending
         self.conn.setblocking(0)
         self.send_buf = b""
 
     def send(self, data=None):
+        if self.closed or self.resetted:
+            return True
         if data:
             self.send_buf += data
         if not self.send_buf:
@@ -80,7 +84,9 @@ class TunnelClient(object):
         self.backend.close()
 
     def _process(self):
-        rlist = self.connections.values()
+        rlist = [c for c in self.connections.values()
+                    if not isinstance(c, Connection) or 
+                    (not c.closed and not c.resetted)]
         wlist = list(self.unfinished)
         try:
             r, w, _ = select.select(rlist, wlist, [])
@@ -110,6 +116,8 @@ class TunnelClient(object):
         conn = self.connections[conn_id]
         if control & StatusControl.rst:
             self._close_connection(conn_id, True)
+            if not conn.resetted:
+                self._send_packet(conn_id, StatusControl.rst)
             return
         # server never sends syn flag at present
         # ack flag is set
@@ -119,6 +127,8 @@ class TunnelClient(object):
         # rst or fin flag is set
         if control & StatusControl.fin:
             self._close_connection(conn_id)
+            if not conn.closed:
+                self._send_packet(conn_id, StatusControl.fin)
 
     def _close_connection(self, conn_id, reset=False):
         conn = self.connections[conn_id]
@@ -144,7 +154,11 @@ class TunnelClient(object):
             data = conn.recv(4096)
         except socket.error as e:
             if e.errno == errno.ECONNRESET:
-                control = StatusControl.rst
+                if conn.connected:
+                    control = StatusControl.rst
+                    conn.resetted = True
+                else:
+                    self._close_connection(conn_id)
                 data = b""
             else:
                 raise
@@ -156,13 +170,18 @@ class TunnelClient(object):
         else:
             if conn.connected and not control:
                 control = StatusControl.fin
-            self._close_connection(conn_id)
+                conn.closed = True
+            else:
+                self._close_connection(conn_id)
         # send packet
         if control:
-            header = tunnel.pack_header(control, conn_id)
-            conn = self.record_layer
-            if not conn.send_packet(header + data):
-                self.unfinished.add(conn)
+            self._send_packet(conn_id, control, data)
+
+    def _send_packet(self, conn_id, control, data=b""):
+        header = tunnel.pack_header(control, conn_id)
+        conn = self.record_layer
+        if not conn.send_packet(header + data):
+            self.unfinished.add(conn)
 
     def _process_sending(self, conn):
         if conn is self.record_layer:
