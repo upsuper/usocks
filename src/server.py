@@ -65,9 +65,10 @@ class TunnelServer(object):
             try:
                 self._process()
             except Exception as e:
+                _, _, exc_tb = sys.exc_info()
+                exc_tb = traceback.extract_tb(exc_tb)
                 msg = "unknown exception occurred: " + str(e)
-                error(msg, 'tunnel', None)
-                debug(''.join(traceback.format_stack()), 'tunnel', None)
+                error(msg + "; " + repr(exc_tb), 'tunnel', None)
         record_layers = self.record_layers.keys()
         for conn in record_layers:
             self._clean_record_layer(conn)
