@@ -32,6 +32,8 @@ def import_frontend(config):
     return lambda: FrontendServer(**config['frontend'])
 
 def log(level, msg, layer, client):
+    if client is None:
+        client = "-"
     return logging.log(level, msg, extra={'layer': layer, 'client': client})
 debug    = partial(log, logging.DEBUG)
 info     = partial(log, logging.INFO)
