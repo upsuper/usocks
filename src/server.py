@@ -60,7 +60,7 @@ class TunnelServer(object):
         self.closed_frontend = ObjectSet()
         # record layers dictionary, in which values are dictionaries
         # of the connections belong to it.
-        self.record_layers = ObjectDict()
+        self.record_conns = ObjectDict()
         # dictionary of frontend connections, in which keys are
         # the frontend connections and values are tuples of
         # their corresponding connection ids and record layer one
@@ -79,9 +79,9 @@ class TunnelServer(object):
                 msg = "unknown exception occurred: {0}, {1}; {2}"\
                         .format(exc_type, str(e), repr(exc_tb))
                 error(msg, 'tunnel', None)
-        record_layers = self.record_layers.keys()
-        for conn in record_layers:
-            self._clean_record_layer(conn)
+        record_conns = self.record_conns.keys()
+        for conn in record_conns:
+            self._clean_record_conn(conn)
             conn.close()
             conn.backend.close()
         self.backend.close()
@@ -89,7 +89,7 @@ class TunnelServer(object):
     def _process(self):
         rlist, rdict = get_select_list('get_rlist',
             (self.backend, ),
-            self.record_layers.iterkeys(),
+            self.record_conns.iterkeys(),
             (f for f in self.frontends.iterkeys()
                 if f not in self.closed_frontend and
                    f not in self.resetted_frontend))
@@ -106,7 +106,7 @@ class TunnelServer(object):
             if conn is self.backend:
                 self._process_backend()
             elif isinstance(conn, record.RecordConnection):
-                self._process_record_layer(conn)
+                self._process_record_conn(conn)
             else:
                 self._process_frontend(conn)
         for fileno in w:
@@ -116,16 +116,16 @@ class TunnelServer(object):
         inst = self.backend.accept()
         if not inst:
             return
-        record_layer = record.RecordConnection(self.key, inst)
-        self.record_layers[record_layer] = {}
+        record_conn = record.RecordConnection(self.key, inst)
+        self.record_conns[record_conn] = {}
         # log connection
         info("connected", 'record', inst.address)
 
-    def _process_record_layer(self, conn):
+    def _process_record_conn(self, conn):
         try:
             packets = conn.receive_packets()
         except record.CriticalException as e:
-            self._clean_record_layer(conn)
+            self._clean_record_conn(conn)
             conn.backend.close()
 
             # logging message
@@ -144,7 +144,7 @@ class TunnelServer(object):
             return
 
         if packets is None:
-            self._clean_record_layer(conn)
+            self._clean_record_conn(conn)
             conn.close()
             conn.backend.close()
             info("disconnected", 'record', conn.backend.address)
@@ -152,11 +152,11 @@ class TunnelServer(object):
             for packet in packets:
                 self._process_packet(conn, packet)
 
-    def _clean_record_layer(self, conn):
-        for front in self.record_layers[conn].values():
+    def _clean_record_conn(self, conn):
+        for front in self.record_conns[conn].values():
             self._close_frontend(front)
         self.unfinished.discard(conn)
-        del self.record_layers[conn]
+        del self.record_conns[conn]
 
     def _close_frontend(self, front, reset=False):
         if reset:
@@ -165,11 +165,11 @@ class TunnelServer(object):
             front.close()
         conn_id, conn = self.frontends[front]
         del self.frontends[front]
-        del self.record_layers[conn][conn_id]
+        del self.record_conns[conn][conn_id]
 
     def _process_packet(self, conn, packet):
         control, conn_id, packet = tunnel.unpack_packet(packet)
-        conns = self.record_layers[conn]
+        conns = self.record_conns[conn]
         # rst flag is set
         if control & StatusControl.rst:
             front = conns[conn_id]

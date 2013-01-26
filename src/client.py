@@ -72,10 +72,10 @@ class TunnelClient(object):
         # initialize backend & record layer
         Backend = tunnel.import_backend(config).ClientBackend
         self.backend = Backend(**config['backend'])
-        self.record_layer = RecordConnection(config['key'], self.backend)
+        self.record_conn = RecordConnection(config['key'], self.backend)
         # initialize connection dict
         self.connections = {
-                tunnel.max_conn_id + 1: self.record_layer,
+                tunnel.max_conn_id + 1: self.record_conn,
                 tunnel.max_conn_id + 2: self.local
                 }
         # TODO a more memory-efficient allocater
@@ -101,8 +101,8 @@ class TunnelClient(object):
             return
         for fileno in r:
             conn = rdict[fileno]
-            if conn is self.record_layer:
-                self._process_record_layer()
+            if conn is self.record_conn:
+                self._process_record_conn()
             elif conn is self.local:
                 self._process_listening()
             else:
@@ -110,8 +110,8 @@ class TunnelClient(object):
         for fileno in w:
             self._process_sending(wdict[fileno])
 
-    def _process_record_layer(self):
-        packets = self.record_layer.receive_packets()
+    def _process_record_conn(self):
+        packets = self.record_conn.receive_packets()
         if packets is None:
             logging.info("remote host has closed connection.")
             self.running = False
@@ -188,12 +188,12 @@ class TunnelClient(object):
 
     def _send_packet(self, conn_id, control, data=b""):
         header = tunnel.pack_header(control, conn_id)
-        conn = self.record_layer
+        conn = self.record_conn
         if not conn.send_packet(header + data):
             self.unfinished.add(conn)
 
     def _process_sending(self, conn):
-        if conn is self.record_layer:
+        if conn is self.record_conn:
             is_finished = conn.continue_sending()
         else:
             is_finished = conn.send()
