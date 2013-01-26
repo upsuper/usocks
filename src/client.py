@@ -144,6 +144,7 @@ class TunnelClient(object):
             conn.setsockopt(socket.SOL_SOCKET,
                     socket.SO_LINGER, b"\1\0\0\0\0\0\0\0")
         conn.close()
+        self.unfinished.discard(conn)
         del self.connections[conn_id]
         self.available_conn_id.append(conn_id)
 
