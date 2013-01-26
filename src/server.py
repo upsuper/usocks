@@ -152,6 +152,7 @@ class TunnelServer(object):
     def _clean_record_layer(self, conn):
         for front in self.record_layers[conn].values():
             self._close_frontend(front)
+        self.unfinished.discard(conn)
         del self.record_layers[conn]
 
     def _close_frontend(self, front, reset=False):
