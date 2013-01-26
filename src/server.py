@@ -114,6 +114,8 @@ class TunnelServer(object):
 
     def _process_backend(self):
         inst = self.backend.accept()
+        if not inst:
+            return
         record_layer = record.RecordConnection(self.key, inst)
         self.record_layers[record_layer] = {}
         # log connection
