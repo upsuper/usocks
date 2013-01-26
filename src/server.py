@@ -104,7 +104,7 @@ class TunnelServer(object):
         for conn in r:
             if conn is self.backend:
                 self._process_backend()
-            elif isinstance(conn, record.RecordLayer):
+            elif isinstance(conn, record.RecordConnection):
                 self._process_record_layer(conn)
             else:
                 self._process_frontend(conn)
@@ -113,7 +113,7 @@ class TunnelServer(object):
 
     def _process_backend(self):
         inst = self.backend.accept()
-        record_layer = record.RecordLayer(self.key, inst)
+        record_layer = record.RecordConnection(self.key, inst)
         self.record_layers[record_layer] = {}
         # log connection
         info("connected", 'record', inst.address)
@@ -231,7 +231,7 @@ class TunnelServer(object):
                 self.closed_frontend.add(front)
 
     def _process_sending(self, conn):
-        if isinstance(conn, record.RecordLayer):
+        if isinstance(conn, record.RecordConnection):
             is_finished = conn.continue_sending()
         else:
             is_finished = conn.send()

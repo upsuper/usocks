@@ -153,7 +153,7 @@ class InvalidHeaderError(CriticalException): pass
 class RemoteResetException(CriticalException): pass
 class InsecureClosingError(CriticalException): pass
 
-class RecordLayer(object):
+class RecordConnection(object):
 
     def __init__(self, key, backend):
         self.backend = backend

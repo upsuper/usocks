@@ -17,7 +17,7 @@ from os import path
 from itertools import chain
 
 from util import ObjectSet
-from record import RecordLayer
+from record import RecordConnection
 from tunnel import StatusControl
 
 class Connection(object):
@@ -64,7 +64,7 @@ class TunnelClient(object):
         # initialize backend & record layer
         Backend = tunnel.import_backend(config).ClientBackend
         self.backend = Backend(**config['backend'])
-        self.record_layer = RecordLayer(config['key'], self.backend)
+        self.record_layer = RecordConnection(config['key'], self.backend)
         # initialize connection dict
         self.connections = {
                 tunnel.max_conn_id + 1: self.record_layer,
