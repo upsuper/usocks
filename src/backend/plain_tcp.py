@@ -54,8 +54,11 @@ class PlainTCPBackend(object):
         # TODO make close non-blocking
         self.conn.close()
 
-    def fileno(self):
-        return self.conn.fileno()
+    def get_rlist(self):
+        return [self.conn.fileno()]
+
+    def get_wlist(self):
+        return [self.conn.fileno()]
 
 class ClientBackend(PlainTCPBackend):
 
@@ -105,5 +108,5 @@ class ServerBackend(object):
     def close(self):
         self.conn.close()
 
-    def fileno(self):
-        return self.conn.fileno()
+    def get_rlist(self):
+        return [self.conn.fileno()]

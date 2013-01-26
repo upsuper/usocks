@@ -337,5 +337,8 @@ class RecordConnection(object):
     def continue_sending(self):
         return self.backend.send()
 
-    def fileno(self):
-        return self.backend.fileno()
+    def get_rlist(self):
+        return self.backend.get_rlist()
+
+    def get_wlist(self):
+        return self.backend.get_wlist()

@@ -104,3 +104,17 @@ class ObjectDict(object):
         if key not in self:
             self[key] = default
         return self[key]
+
+def get_select_list(m, *args):
+    mlist = []
+    mdict = {}
+    for conns in args:
+        for conn in conns:
+            if hasattr(conn, m):
+                l = getattr(conn, m)()
+            else:
+                l = [conn.fileno()]
+            mlist += l
+            for f in l:
+                mdict[f] = conn
+    return mlist, mdict

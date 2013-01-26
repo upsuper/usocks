@@ -16,7 +16,7 @@ import logging
 from os import path
 from itertools import chain
 
-from util import ObjectSet
+from util import ObjectSet, get_select_list
 from record import RecordConnection
 from tunnel import StatusControl
 
@@ -49,6 +49,14 @@ class Connection(object):
         if sent:
             self.send_buf = self.send_buf[sent:]
         return not self.send_buf
+
+    def get_flist(self):
+        if self.closed or self.resetted:
+            return []
+        return [self.conn.fileno()]
+
+    get_rlist = get_flist
+    get_wlist = get_flist
 
     def __getattr__(self, name):
         return getattr(self.conn, name)
@@ -84,23 +92,23 @@ class TunnelClient(object):
         self.backend.close()
 
     def _process(self):
-        rlist = [c for c in self.connections.values()
-                    if not isinstance(c, Connection) or 
-                    (not c.closed and not c.resetted)]
-        wlist = list(self.unfinished)
+        rlist, rdict = get_select_list('get_rlist',
+                self.connections.itervalues())
+        wlist, wdict = get_select_list('get_wlist', self.unfinished)
         try:
             r, w, _ = select.select(rlist, wlist, [])
         except select.error as e:
             return
-        for conn in r:
+        for fileno in r:
+            conn = rdict[fileno]
             if conn is self.record_layer:
                 self._process_record_layer()
             elif conn is self.local:
                 self._process_listening()
             else:
                 self._process_connection(conn)
-        for conn in w:
-            self._process_sending(conn)
+        for fileno in w:
+            self._process_sending(wdict[fileno])
 
     def _process_record_layer(self):
         packets = self.record_layer.receive_packets()

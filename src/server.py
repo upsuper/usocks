@@ -21,7 +21,7 @@ from functools import partial
 import record
 import frontend
 
-from util import ObjectSet, ObjectDict
+from util import ObjectSet, ObjectDict, get_select_list
 from tunnel import StatusControl
 
 def import_frontend(config):
@@ -87,13 +87,13 @@ class TunnelServer(object):
         self.backend.close()
 
     def _process(self):
-        rlist = list(chain(
+        rlist, rdict = get_select_list('get_rlist',
             (self.backend, ),
             self.record_layers.iterkeys(),
             (f for f in self.frontends.iterkeys()
                 if f not in self.closed_frontend and
-                   f not in self.resetted_frontend)))
-        wlist = list(self.unfinished)
+                   f not in self.resetted_frontend))
+        wlist, wdict = get_select_list('get_wlist', self.unfinished)
         try:
             r, w, _ = select.select(rlist, wlist, [])
         except select.error as e:
@@ -101,15 +101,16 @@ class TunnelServer(object):
                 return
             else:
                 raise
-        for conn in r:
+        for fileno in r:
+            conn = rdict[fileno]
             if conn is self.backend:
                 self._process_backend()
             elif isinstance(conn, record.RecordConnection):
                 self._process_record_layer(conn)
             else:
                 self._process_frontend(conn)
-        for conn in w:
-            self._process_sending(conn)
+        for fileno in w:
+            self._process_sending(wdict[fileno])
 
     def _process_backend(self):
         inst = self.backend.accept()

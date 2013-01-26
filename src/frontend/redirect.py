@@ -61,5 +61,8 @@ class FrontendServer(object):
                 socket.SO_LINGER, b"\1\0\0\0\0\0\0\0")
         self.conn.close()
 
-    def fileno(self):
-        return self.conn.fileno()
+    def get_rlist(self):
+        return [self.conn.fileno()]
+
+    def get_wlist(self):
+        return [self.conn.fileno()]
