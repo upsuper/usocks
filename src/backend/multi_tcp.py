@@ -55,14 +55,26 @@ class MultiTCPBackend(object):
         return complete
 
     def recv(self):
-        conn = self.conns[self.cur_recving]
-        data = conn.recv(self.remaining_bytes)
+        data = b""
+        while True:
+            conn = self.conns[self.cur_recving]
+            try:
+                packet = conn.recv(self.remaining_bytes)
+            except socket.error as e:
+                if e.errno == errno.EAGAIN:
+                    break
+                raise
+            if packet == b"":
+                break
+            self.remaining_bytes -= len(packet)
+            data += packet
+            if self.remaining_bytes == 0:
+                self.cur_recving = (self.cur_recving + 1) % self.number
+                self.remaining_bytes = self.blocksize
+            else:
+                break
         if data == b"":
-            return None
-        self.remaining_bytes -= len(data)
-        if self.remaining_bytes == 0:
-            self.cur_recving = (self.cur_recving + 1) % self.number
-            self.remaining_bytes = self.blocksize
+            data = None
         return data
 
     def close(self):
