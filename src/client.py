@@ -87,6 +87,7 @@ class TunnelClient(object):
         self.running = True
         while self.running:
             self._process()
+        self.local.setblocking(0)
         for conn in self.connections.values():
             conn.close()
         self.backend.close()
