@@ -105,9 +105,9 @@ class TunnelServer(object):
             conn = rdict[fileno]
             if conn is self.backend:
                 self._process_backend()
-            elif isinstance(conn, record.RecordConnection):
+            elif conn in self.record_conns:
                 self._process_record_conn(conn)
-            else:
+            elif conn in self.frontends:
                 self._process_frontend(conn)
         for fileno in w:
             self._process_sending(wdict[fileno])
