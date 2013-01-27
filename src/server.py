@@ -87,12 +87,23 @@ class TunnelServer(object):
         self.backend.close()
 
     def _process(self):
-        rlist, rdict = get_select_list('get_rlist',
+        rset = ObjectSet(chain(
             (self.backend, ),
             self.record_conns.iterkeys(),
-            (f for f in self.frontends.iterkeys()
-                if f not in self.closed_frontend and
-                   f not in self.resetted_frontend))
+            self.frontends.iterkeys()))
+        # remove closed or resetted frontend
+        rset -= self.closed_frontend | self.resetted_frontend
+        # remove the counterpart of which is waiting for writting
+        for conn in self.unfinished:
+            if conn in self.record_conns:
+                conns = self.record_conns[conn]
+                for front in conns.itervalues():
+                    rset.discard(front)
+            elif conn in self.frontends:
+                _, record_conn = self.frontends[conn]
+                rset.discard(record_conn)
+        # get lists of filenoes to be selected
+        rlist, rdict = get_select_list('get_rlist', rset)
         wlist, wdict = get_select_list('get_wlist', self.unfinished)
         try:
             r, w, _ = select.select(rlist, wlist, [])
@@ -208,7 +219,9 @@ class TunnelServer(object):
 
     def _send_packet(self, conn, conn_id, control, data=b""):
         header = tunnel.pack_header(control, conn_id)
-        if not conn.send_packet(header + data):
+        if conn.send_packet(header + data):
+            self.unfinished.discard(conn)
+        else:
             self.unfinished.add(conn)
 
     def _process_frontend(self, front):
@@ -235,7 +248,7 @@ class TunnelServer(object):
                 self.closed_frontend.add(front)
 
     def _process_sending(self, conn):
-        if isinstance(conn, record.RecordConnection):
+        if conn in self.record_conns:
             is_finished = conn.continue_sending()
         else:
             is_finished = conn.send()

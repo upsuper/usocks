@@ -17,8 +17,36 @@ class ObjectSet(object):
     def __iter__(self):
         return self._dict.itervalues()
 
+    def __repr__(self):
+        return 'ObjectSet(' + repr(self._dict.values()) + ')'
+
     def __contains__(self, elem):
         return id(elem) in self._dict
+
+    def union(self, *others):
+        new_set = self.copy()
+        new_set.update(*others)
+        return new_set
+    __or__ = union
+
+    def copy(self):
+        new_set = ObjectSet()
+        new_set._dict = self._dict.copy()
+        return new_set
+
+    def update(self, *others):
+        for other in others:
+            for elem in other:
+                self.add(elem)
+        return self
+    __ior__ = update
+
+    def difference_update(self, *others):
+        for other in others:
+            for elem in other:
+                self.discard(elem)
+        return self
+    __isub__ = difference_update
 
     def add(self, elem):
         self._dict[id(elem)] = elem
@@ -28,7 +56,7 @@ class ObjectSet(object):
 
     def discard(self, elem):
         if elem in self:
-            del self._dict[id(elem)]
+            self.remove(elem)
 
     def pop(self):
         _, elem = self._dict.popitem()
