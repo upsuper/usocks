@@ -11,14 +11,20 @@ DEFAULT_NUMBER = 5
 
 class MultiTCPBackend(object):
     
-    def __init__(self, number, blocksize):
-        self.number = number
-        self.blocksize = blocksize
-        self.send_bufs = [b"" for i in range(number)]
+    blocksize = DEFAULT_BLOCKSIZE
+    number = DEFAULT_NUMBER
+
+    def __init__(self, **opts):
+        if 'blocksize' in opts:
+            self.blocksize = opts['blocksize']
+        if 'number' in opts:
+            self.number = opts['number']
+
+        self.send_bufs = [b"" for i in range(self.number)]
         self.cur_filling = 0
         self.filled_bytes = 0
         self.cur_recving = 0
-        self.remaining_bytes = blocksize
+        self.remaining_bytes = self.blocksize
 
     def send(self, data=None, urgent=True):
         while data:
@@ -94,20 +100,14 @@ class ClientBackend(MultiTCPBackend):
 
     server = "127.0.0.1"
     port = DEFAULT_PORT
-    blocksize = DEFAULT_BLOCKSIZE
-    number = DEFAULT_NUMBER
 
     def __init__(self, **opts):
+        super(ClientBackend, self).__init__(**opts)
+
         if 'server' in opts:
             self.server = opts['server']
         if 'port' in opts:
             self.port = opts['port']
-        if 'blocksize' in opts:
-            self.blocksize = opts['blocksize']
-        if 'number' in opts:
-            self.number = opts['number']
-
-        super(ClientBackend, self).__init__(self.number, self.blocksize)
 
         # initialize socket
         self.conns = [socket.socket() for i in range(self.number)]
@@ -118,8 +118,8 @@ class ClientBackend(MultiTCPBackend):
 
 class ServerInstance(MultiTCPBackend):
 
-    def __init__(self, conns, address, blocksize):
-        super(ServerInstance, self).__init__(len(conns), blocksize)
+    def __init__(self, conns, address, **opts):
+        super(ServerInstance, self).__init__(**opts)
 
         self.conns = conns
         self.address = address
@@ -134,6 +134,7 @@ class ServerBackend(object):
     number = DEFAULT_NUMBER
 
     def __init__(self, **opts):
+        self.opts = opts
         if 'address' in opts:
             self.address = opts['address']
         if 'port' in opts:
@@ -161,7 +162,7 @@ class ServerBackend(object):
         # create new instance
         conns = self.connections[address]
         del self.connections[address]
-        return ServerInstance(conns, address, self.blocksize)
+        return ServerInstance(conns, address, **self.opts)
 
     def close(self):
         self.conn.close()
