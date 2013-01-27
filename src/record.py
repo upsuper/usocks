@@ -152,6 +152,7 @@ class HashfailError(CriticalException): pass
 class InvalidHeaderError(CriticalException): pass
 class RemoteResetException(CriticalException): pass
 class InsecureClosingError(CriticalException): pass
+class FirstPacketIncorrectError(CriticalException): pass
 class ConnectionClosedException(Exception): pass
 
 class RecordConnection(object):
@@ -170,6 +171,7 @@ class RecordConnection(object):
         self.cipher_buf = b""
         self.plain_buf = b""
         self.recv_synchornized = False
+        self.first_packet_checked = False
         self.header_arrived = False
         self.secure_closed = False
         self.closed = False
@@ -291,6 +293,7 @@ class RecordConnection(object):
             # check hash
             if _hash(packet) != digest:
                 raise HashfailError()
+            self.first_packet_checked = True
             # return packet
             if self.packet_type == PacketType.nodata:
                 pass
@@ -326,9 +329,14 @@ class RecordConnection(object):
                 for packet in self._extract_packets():
                     yield packet
             except RemoteResetException:
+                self.closed = True
                 raise
             except CriticalException:
-                self._send_reset()
+                self.closed = True
+                if self.first_packet_checked:
+                    self._send_reset()
+                else:
+                    raise FirstPacketIncorrectError()
                 raise
 
     def close(self):

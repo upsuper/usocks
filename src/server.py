@@ -128,6 +128,8 @@ class TunnelServer(object):
                 msg = "remote host reset the connection"
             elif isinstance(e, record.InsecureClosingError):
                 msg = "detect an insecure closing"
+            elif isinstance(e, record.FirstPacketIncorrectError):
+                msg = "first packet is incorrect, protocol incompatible"
             else:
                 msg = "detect a critical exception"
             # log the exception
