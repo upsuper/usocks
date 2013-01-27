@@ -8,6 +8,7 @@ from collections import defaultdict
 DEFAULT_PORT = 4194
 DEFAULT_BLOCKSIZE = 8192
 DEFAULT_NUMBER = 5
+BUFFER_SIZE = 16384
 
 class MultiTCPBackend(object):
     
@@ -25,8 +26,15 @@ class MultiTCPBackend(object):
         self.filled_bytes = 0
         self.cur_recving = 0
         self.remaining_bytes = self.blocksize
+        self.is_urgent = True
 
     def send(self, data=None, urgent=True):
+        if urgent and data:
+            self.is_urgent = True
+        elif not urgent:
+            buf_len = sum(len(buf) for buf in self.send_bufs)
+            if buf_len == 0:
+                self.is_urgent = False
         while data:
             left_bytes = self.blocksize - self.filled_bytes
             if len(data) >= left_bytes:
@@ -38,12 +46,12 @@ class MultiTCPBackend(object):
                 self.send_bufs[self.cur_filling] += data
                 self.filled_bytes += len(data)
                 break
-        if not urgent:
+        if not self.is_urgent:
             return True
         return self._continue()
 
     def _continue(self):
-        complete = True
+        available = True
         for i, conn in zip(range(self.number), self.conns):
             if not self.send_bufs[i]:
                 continue
@@ -56,9 +64,9 @@ class MultiTCPBackend(object):
                     raise
             if sent:
                 self.send_bufs[i] = self.send_bufs[i][sent:]
-            if self.send_bufs[i]:
-                complete = False
-        return complete
+            if len(self.send_bufs[i]) >= BUFFER_SIZE:
+                available = False
+        return available
 
     def recv(self):
         data = b""
@@ -93,6 +101,8 @@ class MultiTCPBackend(object):
         return [self.conns[self.cur_recving].fileno()]
 
     def get_wlist(self):
+        if not self.is_urgent:
+            return []
         return [self.conns[i].fileno()
                 for i in range(self.number) if self.send_bufs[i]]
 

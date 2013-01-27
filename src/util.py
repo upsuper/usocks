@@ -114,8 +114,8 @@ class ObjectDict(object):
         return self._values.values()
 
     def iteritems(self):
-        return ((self._keys[k], self._values[k])
-                for k in self._keys.iterkeys())
+        for k in self._keys.iterkeys():
+            yield self._keys[k], self._values[k]
 
     def iterkeys(self):
         return self._keys.itervalues()
@@ -133,16 +133,36 @@ class ObjectDict(object):
             self[key] = default
         return self[key]
 
+def flatten(obj):
+    try:
+        for subobj in obj:
+            for item in flatten(subobj):
+                if not hasattr(item, 'get_rlist'):
+                    print repr(item), repr(subobj), repr(obj)
+                yield item
+    except TypeError:
+        yield obj
+
 def get_select_list(m, *args):
     mlist = []
     mdict = {}
-    for conns in args:
-        for conn in conns:
-            if hasattr(conn, m):
-                l = getattr(conn, m)()
-            else:
-                l = [conn.fileno()]
-            mlist += l
-            for f in l:
-                mdict[f] = conn
+    for conn in flatten(args):
+        flist = getattr(conn, m)()
+        if not flist:
+            continue
+        mlist += flist
+        for fno in flist:
+            mdict[fno] = conn
     return mlist, mdict
+
+def import_backend(config):
+    fromlist = ['ServerBackend', 'ClientBackend']
+    package = 'backend.' + config['backend']['type']
+    return __import__(package, fromlist=fromlist)
+
+def import_frontend(config):
+    fromlist = ['FrontendServer']
+    package = 'frontend.' + config['frontend']['type']
+    package = __import__(package, fromlist=fromlist)
+    FrontendServer = package.FrontendServer
+    return lambda: FrontendServer(**config['frontend'])

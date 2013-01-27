@@ -8,7 +8,6 @@ import yaml
 import errno
 import signal
 import socket
-import tunnel
 import select
 import getopt
 import logging
@@ -19,17 +18,14 @@ from itertools import chain
 from functools import partial
 
 import record
-import frontend
+import tunnel
 
-from util import ObjectSet, ObjectDict, get_select_list
-from tunnel import StatusControl
-
-def import_frontend(config):
-    fromlist = ['FrontendServer']
-    package = 'frontend.' + config['frontend']['type']
-    package = __import__(package, fromlist=fromlist)
-    FrontendServer = package.FrontendServer
-    return lambda: FrontendServer(**config['frontend'])
+from util import get_select_list
+from util import ObjectSet, ObjectDict
+from util import import_backend, import_frontend
+from record import RecordConnection
+from tunnel import TunnelConnection, StatusControl
+from frontend import FrontendUnavailableError
 
 def log(level, msg, layer, client):
     if client is None:
@@ -41,30 +37,20 @@ warning  = partial(log, logging.WARNING)
 error    = partial(log, logging.ERROR)
 critical = partial(log, logging.CRITICAL)
 
-class FakeFrontend(object):
-    def close(): pass
-    def reset(): pass
-
 class TunnelServer(object):
 
     def __init__(self, config):
-        Backend = tunnel.import_backend(config).ServerBackend
+        Backend = import_backend(config).ServerBackend
         self.backend = Backend(**config['backend'])
         self.new_frontend = import_frontend(config)
         self.key = config['key']
-        # initialize objectsets
-        # connections waiting for sending
-        self.unfinished = ObjectSet()
-        # frontends has been resetted or closed, and waiting to be released
-        self.resetted_frontend = ObjectSet()
-        self.closed_frontend = ObjectSet()
-        # record layers dictionary, in which values are dictionaries
-        # of the connections belong to it.
-        self.record_conns = ObjectDict()
-        # dictionary of frontend connections, in which keys are
-        # the frontend connections and values are tuples of
-        # their corresponding connection ids and record layer one
-        # belongs to.
+        # tunnels dictionary, in which values are dictionaries of the
+        # connections belong to it. Those dictionaries' key is the
+        # Connection ID and value is the frontend instance.
+        self.tunnels = ObjectDict()
+        # dictionary of frontend instances, in which keys are the
+        # frontend instances and values are tuples of their
+        # corresponding Connection IDs and tunnel one belongs to.
         self.frontends = ObjectDict()
 
     def run(self):
@@ -79,65 +65,59 @@ class TunnelServer(object):
                 msg = "unknown exception occurred: {0}, {1}; {2}"\
                         .format(exc_type, str(e), repr(exc_tb))
                 error(msg, 'tunnel', None)
-        record_conns = self.record_conns.keys()
-        for conn in record_conns:
-            self._clean_record_conn(conn)
-            conn.close()
-            conn.backend.close()
+        # close connections
+        for tunnel in self.tunnels.keys():
+            self._close_tunnel(tunnel)
         self.backend.close()
 
     def _process(self):
-        rset = ObjectSet(chain(
-            (self.backend, ),
-            self.record_conns.iterkeys(),
-            self.frontends.iterkeys()))
-        # remove closed or resetted frontend
-        rset -= self.closed_frontend | self.resetted_frontend
-        # remove the counterpart of which is waiting for writting
-        for conn in self.unfinished:
-            if conn in self.record_conns:
-                conns = self.record_conns[conn]
-                for front in conns.itervalues():
-                    rset.discard(front)
-            elif conn in self.frontends:
-                _, record_conn = self.frontends[conn]
-                rset.discard(record_conn)
-        # get lists of filenoes to be selected
-        rlist, rdict = get_select_list('get_rlist', rset)
-        wlist, wdict = get_select_list('get_wlist', self.unfinished)
+        rlist, rdict = get_select_list('get_rlist',
+                self.backend, self.tunnels.iterkeys(),
+                (frontend for frontend, (conn_id, tunnel)
+                    in self.frontends.iteritems()
+                    if tunnel.available))
+        wlist, wdict = get_select_list('get_wlist',
+                self.tunnels.iterkeys(), self.frontends.iterkeys())
         try:
-            r, w, _ = select.select(rlist, wlist, [])
+            rlist, wlist, _ = select.select(rlist, wlist, [])
         except select.error as e:
             if e[0] == errno.EINTR:
                 return
-            else:
-                raise
-        for fileno in r:
+            raise
+        for fileno in rlist:
             conn = rdict[fileno]
             if conn is self.backend:
                 self._process_backend()
-            elif conn in self.record_conns:
-                self._process_record_conn(conn)
+            elif conn in self.tunnels:
+                self._process_tunnel(conn)
             elif conn in self.frontends:
                 self._process_frontend(conn)
-        for fileno in w:
-            self._process_sending(wdict[fileno])
+        for fileno in wlist:
+            conn = wdict[fileno]
+            if conn in self.tunnels:
+                conn.continue_sending()
+            else:
+                conn.send()
 
     def _process_backend(self):
         inst = self.backend.accept()
         if not inst:
             return
-        record_conn = record.RecordConnection(self.key, inst)
-        self.record_conns[record_conn] = {}
-        # log connection
-        info("connected", 'record', inst.address)
+        record_conn = RecordConnection(self.key, inst)
+        tunnel = TunnelConnection(record_conn)
+        tunnel.address = inst.address
+        self.tunnels[tunnel] = {}
+        info("connected", 'backend', inst.address)
 
-    def _process_record_conn(self, conn):
+    def _process_tunnel(self, tunnel):
         try:
-            packets = conn.receive_packets()
+            for packet in tunnel.receive_packets():
+                self._process_tunnel_packet(tunnel, *packet)
+        except record.ConnectionClosedException:
+            self._close_tunnel(tunnel)
+            info("disconnected", 'record', tunnel.address)
         except record.CriticalException as e:
-            self._clean_record_conn(conn)
-            conn.backend.close()
+            self._close_tunnel(tunnel)
 
             # logging message
             if isinstance(e, record.HashfailError):
@@ -151,109 +131,63 @@ class TunnelServer(object):
             else:
                 msg = "detect a critical exception"
             # log the exception
-            warning(msg, 'record', conn.backend.address)
-            return
+            warning(msg, 'record', tunnel.address)
 
-        if packets is None:
-            self._clean_record_conn(conn)
-            conn.close()
-            conn.backend.close()
-            info("disconnected", 'record', conn.backend.address)
-        else:
-            for packet in packets:
-                self._process_packet(conn, packet)
-
-    def _clean_record_conn(self, conn):
-        for front in self.record_conns[conn].values():
-            self._close_frontend(front)
-        self.unfinished.discard(conn)
-        del self.record_conns[conn]
-
-    def _close_frontend(self, front, reset=False):
-        if reset:
-            front.reset()
-        else:
-            front.close()
-        conn_id, conn = self.frontends[front]
-        del self.frontends[front]
-        del self.record_conns[conn][conn_id]
-
-    def _process_packet(self, conn, packet):
-        control, conn_id, packet = tunnel.unpack_packet(packet)
-        conns = self.record_conns[conn]
-        # rst flag is set
+    def _process_tunnel_packet(self, tunnel, conn_id, control, data):
+        frontends = self.tunnels[tunnel]
+        # RST flag is set
         if control & StatusControl.rst:
-            front = conns[conn_id]
-            self._close_frontend(front, True)
-            if front in self.resetted_frontend:
-                self.resetted_frontend.remove(front)
-            else:
-                self._send_packet(conn, conn_id, StatusControl.rst)
-            return
-        # syn flag is set
+            self._close_frontend(frontends[conn_id], True)
+        # SYN flag is set
         if control & StatusControl.syn:
-            if conn_id in conns:
-                self._close_frontend(conns[conn_id])
+            if conn_id in frontends:
+                self._close_frontend(frontends[conn_id], True)
             try:
-                front = self.new_frontend()
-            except frontend.FrontendUnavailableError as e:
-                error(e.message, 'frontend', conn.backend.address)
-                front = FakeFrontend()
-                self.resetted_frontend.add(front)
-                self._send_packet(conn, conn_id, StatusControl.rst)
+                frontend = self.new_frontend()
+            except FrontendUnavailableError:
+                error(e.message, 'frontend', tunnel.address)
+                tunnel.reset_connection(conn_id)
                 return
-            conns[conn_id] = front
-            self.frontends[front] = conn_id, conn
-        # ack flag is set
+            frontends[conn_id] = frontend
+            self.frontends[frontend] = conn_id, tunnel
+        # DAT flag is set
         if control & StatusControl.dat:
-            if not conns[conn_id].send(packet):
-                self.unfinished.add(conns[conn_id])
-        # rst or fin flag is set
+            frontends[conn_id].send(data)
+        # FIN flag is set
         if control & StatusControl.fin:
-            front = conns[conn_id]
-            self._close_frontend(front)
-            if front in self.closed_frontend:
-                self.closed_frontend.remove(front)
-            else:
-                self._send_packet(conn, conn_id, StatusControl.fin)
+            self._close_frontend(frontends[conn_id])
 
-    def _send_packet(self, conn, conn_id, control, data=b""):
-        header = tunnel.pack_header(control, conn_id)
-        if conn.send_packet(header + data):
-            self.unfinished.discard(conn)
-        else:
-            self.unfinished.add(conn)
-
-    def _process_frontend(self, front):
-        control = 0
+    def _process_frontend(self, frontend):
+        conn_id, tunnel = self.frontends[frontend]
         try:
-            data = front.recv()
+            data = frontend.recv()
         except Exception as e:
-            _, conn = self.frontends[front]
             msg = "unknown error: " + str(e)
-            error(msg, 'frontend', conn.backend.address)
-            data = b""
-            control = StatusControl.rst
+            error(msg, 'frontend', tunnel.address)
+            tunnel.reset_connection(conn_id)
+            self._close_frontend(frontend)
+            return
         if data:
-            control = StatusControl.dat
+            tunnel.send_packet(conn_id, data)
         elif data is None:
-            data = b""
-            control = StatusControl.fin
-        if control:
-            conn_id, conn = self.frontends[front]
-            self._send_packet(conn, conn_id, control, data)
-            if control & StatusControl.rst:
-                self.resetted_frontend.add(front)
-            elif control & StatusControl.fin:
-                self.closed_frontend.add(front)
+            tunnel.close_connection(conn_id)
+            self._close_frontend(frontend)
 
-    def _process_sending(self, conn):
-        if conn in self.record_conns:
-            is_finished = conn.continue_sending()
+    def _close_tunnel(self, tunnel):
+        for frontend in self.tunnels[tunnel].values():
+            self._close_frontend(frontend)
+        tunnel.record_conn.close()
+        tunnel.record_conn.backend.close()
+        del self.tunnels[tunnel]
+
+    def _close_frontend(self, frontend, reset=False):
+        if reset:
+            frontend.reset()
         else:
-            is_finished = conn.send()
-        if is_finished:
-            self.unfinished.remove(conn)
+            frontend.close()
+        conn_id, tunnel = self.frontends[frontend]
+        del self.frontends[frontend]
+        del self.tunnels[tunnel][conn_id]
 
 def usage():
     pass

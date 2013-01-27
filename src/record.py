@@ -152,6 +152,7 @@ class HashfailError(CriticalException): pass
 class InvalidHeaderError(CriticalException): pass
 class RemoteResetException(CriticalException): pass
 class InsecureClosingError(CriticalException): pass
+class ConnectionClosedException(Exception): pass
 
 class RecordConnection(object):
 
@@ -171,6 +172,7 @@ class RecordConnection(object):
         self.recv_synchornized = False
         self.header_arrived = False
         self.secure_closed = False
+        self.closed = False
         # part packet buffer
         self.part_packet = b""
         # The first block must not contain any useful data or it will
@@ -203,6 +205,15 @@ class RecordConnection(object):
         return self._send_packet(b"", padding, PacketType.close)
 
     def send_packet(self, data):
+        """send_packet(data) --> bool
+
+        Send packet to record layer. Return False if buffer of backend
+        has been filled, and caller should not send more data. Return
+        True otherwise. Whether or not sending buffer is available,
+        caller should call get_wlist() for file descriptors waiting
+        for writing, and call continue_sending() when one of them are
+        selected to continue.
+        """
         data_len = len(data)
         while data_len > 65535:    # the max size a packet can contain
             new_len = 65532 # (65532 + header_size) % block_size == 0
@@ -234,8 +245,6 @@ class RecordConnection(object):
         return True
 
     def _extract_packets(self):
-        packets = []
-
         while True:
             length = len(self.plain_buf)
             if length < header_size:
@@ -295,35 +304,32 @@ class RecordConnection(object):
                 if self.part_packet:
                     data = self.part_packet + data
                     self.part_packet = b""
-                packets.append(data)
-
-        return packets
+                yield data
 
     def receive_packets(self):
-        """receive_packets() --> list of packets or None
+        """receive_packets() --> packet
 
-        It will return any packets available. If backend has been
-        closed, this method will return None to notify the upper.
+        It will yield packets if there are any. If backend has been
+        closed, this method will raise ConnectionClosedException.
         If the connection seems to be attacked, it will raise 
         different kinds of exceptions.
         """
         data = self.backend.recv()
         if data is None:
+            self.closed = True
             if not self.secure_closed:
                 raise InsecureClosingError()
-            return None
+            raise ConnectionClosedException()
         self.cipher_buf += data
         if self._update_buffer():
             try:
-                packet = self._extract_packets()
+                for packet in self._extract_packets():
+                    yield packet
             except RemoteResetException:
                 raise
             except CriticalException:
                 self._send_reset()
                 raise
-            return packet
-        else:
-            return []
 
     def close(self):
         """close() --> None
@@ -332,9 +338,14 @@ class RecordConnection(object):
         but will not close the backend. The caller is responsible for
         closing the backend.
         """
-        self._send_close()
+        if not self.closed:
+            self._send_close()
 
     def continue_sending(self):
+        """continue_sending() --> bool
+
+        The return value has the same meaning with send_packet().
+        """
         return self.backend.send()
 
     def get_rlist(self):

@@ -71,29 +71,133 @@ VERSION_CODE = 1
 
 import struct
 
-class UnsupportVersionError(Exception):
-    pass
+class UnsupportVersionError(Exception): pass
+class NoIDAvailableError(Exception): pass
 
 header_format = "!BBH"
 header_size = struct.calcsize(header_format)
 max_conn_id = 65535
-
-def pack_header(control, conn_id):
-    return struct.pack(header_format, VERSION_CODE, control, conn_id)
-
-def unpack_packet(packet):
-    ver, control, conn_id = struct.unpack(header_format, packet[:header_size])
-    if ver != VERSION_CODE:
-        raise UnsupportVersionError()
-    return control, conn_id, packet[header_size:]
-
-def import_backend(config):
-    fromlist = ['ServerBackend', 'ClientBackend']
-    package = 'backend.' + config['backend']['type']
-    return __import__(package, fromlist=fromlist)
 
 class StatusControl(object):
     syn = 1 # first packet, means connection is started
     dat = 2 # data transmission
     fin = 4 # connection is closed
     rst = 8 # connection is resetted
+
+class ConnectionStatus(object):
+    new         = 0 # connection is created, but SYN has not been sent
+    connected   = 1 # connection has established
+    closing     = 2 # FIN has been sent, waiting for reply
+    resetting   = 3 # RST has been sent, waiting for reply
+    closed      = 4 # connection has been closed
+
+class IDAllocator(object):
+
+    def __init__(self, min_id, max_id):
+        self.next_id = min_id
+        self.max_id = max_id
+        self.recycled = set()
+
+    def allocate(self):
+        if self.recycled:
+            return self.recycled.pop()
+        if self.next_id >= self.max_id:
+            raise NoIDAvailableError()
+        next_id = self.next_id
+        self.next_id += 1
+        return next_id
+
+    def recycle(self, conn_id):
+        self.recycled.add(conn_id)
+        while (self.next_id - 1) in self.recycled:
+            self.next_id -= 1
+            self.recycled.remove(self.next_id)
+
+class TunnelConnection(object):
+
+    def __init__(self, record_conn):
+        self.record_conn = record_conn
+        self.id_allocator = IDAllocator(1, max_conn_id)
+        self.conn_states = {}
+        # is tunnel available for writing?
+        self.available = True
+
+    def new_connection(self):
+        conn_id = self.id_allocator.allocate()
+        self.conn_states[conn_id] = ConnectionStatus.new
+        return conn_id
+
+    def reset_connection(self, conn_id):
+        if self.conn_states[conn_id] == ConnectionStatus.connected:
+            self._send_packet(conn_id, StatusControl.rst)
+        self.conn_states[conn_id] = ConnectionStatus.resetting
+
+    def close_connection(self, conn_id):
+        if self.conn_states[conn_id] == ConnectionStatus.connected:
+            self._send_packet(conn_id, StatusControl.fin)
+        self.conn_states[conn_id] = ConnectionStatus.closing
+
+    def send_packet(self, conn_id, data):
+        if not data:
+            return
+        control = StatusControl.dat
+        if self.conn_states[conn_id] == ConnectionStatus.new:
+            control |= StatusControl.syn
+            self.conn_states[conn_id] = ConnectionStatus.connected
+        self._send_packet(conn_id, control, data)
+
+    def receive_packets(self):
+        for packet in self.record_conn.receive_packets():
+            packet = self._process_packet(packet)
+            if packet:
+                yield packet
+
+    def _process_packet(self, packet):
+        ver, control, conn_id = \
+                struct.unpack(header_format, packet[:header_size])
+        if ver != VERSION_CODE:
+            raise UnsupportVersionError()
+        data = packet[header_size:]
+
+        # RST flag is set
+        if control & StatusControl.rst:
+            old_state = self.conn_states[conn_id]
+            self.reset_connection(conn_id)
+            self.conn_states[conn_id] = ConnectionStatus.closed
+            self.id_allocator.recycle(conn_id)
+            if old_state != ConnectionStatus.connected:
+                return None
+            return conn_id, StatusControl.rst, b""
+        # SYN flag is set
+        if control & StatusControl.syn:
+            self.conn_states[conn_id] = ConnectionStatus.connected
+        # clear DAT flag if status is not connected
+        if self.conn_states[conn_id] != ConnectionStatus.connected:
+            control &= ~StatusControl.dat
+        # if DAT flag is not set, no data should be returned
+        if not (control & StatusControl.dat):
+            data = b""
+        # FIN flag is set
+        if control & StatusControl.fin:
+            old_state = self.conn_states[conn_id]
+            self.close_connection(conn_id)
+            self.conn_states[conn_id] = ConnectionStatus.closed
+            self.id_allocator.recycle(conn_id)
+            if old_state != ConnectionStatus.connected:
+                return None
+        if not control:
+            return None
+        return conn_id, control, data
+
+    def _send_packet(self, conn_id, control, data=b""):
+        header = struct.pack(header_format, VERSION_CODE, control, conn_id)
+        self.available = self.record_conn.send_packet(header + data)
+
+    def continue_sending(self):
+        self.available = self.record_conn.continue_sending()
+
+    def get_rlist(self):
+        return self.record_conn.get_rlist()
+
+    def get_wlist(self):
+        return self.record_conn.get_wlist()

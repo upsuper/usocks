@@ -4,33 +4,26 @@ import socket
 import errno
 
 DEFAULT_PORT = 4194
+BUFFER_SIZE = 16384
 
 class PlainTCPBackend(object):
     
     def __init__(self):
         self.send_buf = b""
+        self.is_urgent = True
 
     def send(self, data=None, urgent=True):
-        """send(data[, urgent]) --> Bool
-
-        Send data. If urgent is set to False, data may not be sent
-        immediately. It depends on backend when a non-urgent data
-        will be sent. But anyway, all data will be sent sequentially.
-        The return value has the same meaning with _continue.
-        """
+        if urgent and data:
+            self.is_urgent = True
+        elif not urgent and not self.send_buf:
+            self.is_urgent = False
         if data:
             self.send_buf += data
-        if not urgent:
+        if not self.is_urgent:
             return True
         return self._continue()
 
     def _continue(self):
-        """_continue() --> Bool
-
-        Continue sending. Return True if all urgent data in sending
-        buffer has been sent, False otherwise. Caller should call this
-        method until it returns True.
-        """
         if self.send_buf:
             try:
                 sent = self.conn.send(self.send_buf)
@@ -41,7 +34,7 @@ class PlainTCPBackend(object):
                     raise
             if sent:
                 self.send_buf = self.send_buf[sent:]
-        return not self.send_buf
+        return len(self.send_buf) < BUFFER_SIZE
 
     def recv(self):
         data = self.conn.recv(4096)
@@ -58,7 +51,8 @@ class PlainTCPBackend(object):
         return [self.conn.fileno()]
 
     def get_wlist(self):
-        return [self.conn.fileno()]
+        if self.send_buf and self.is_urgent:
+            return [self.conn.fileno()]
 
 class ClientBackend(PlainTCPBackend):
 
