@@ -83,5 +83,4 @@ setup applications to use the port as SOCKS server.
 
 * Provide a mechanism to enable backends to exchange data with its
   counterpart, so that more complicated backends can be implemented.
-* Enable server to establish connections.
 * Implement a simple SOCKSv5 server as a frontend.
