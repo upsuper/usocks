@@ -111,7 +111,7 @@ class TunnelClient(object):
                 self._process_tunnel()
             elif conn is self.local_conn:
                 self._process_listening()
-            else:
+            elif conn.conn_id in self.conns:
                 self._process_connection(conn)
         for fileno in wlist:
             self._process_sending(wdict[fileno])
@@ -119,6 +119,8 @@ class TunnelClient(object):
     def _process_tunnel(self):
         try:
             for conn_id, control, data in self.tunnel.receive_packets():
+                if conn_id not in self.conns:
+                    continue
                 conn = self.conns[conn_id]
                 if control & StatusControl.rst:
                     self._close_connection(conn_id, True)
