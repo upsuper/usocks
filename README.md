@@ -78,9 +78,3 @@ to redirect traffic to the SOCKS server.
 
 Finally execute `./server.py` on server, `./client.py` on client, and
 setup applications to use the port as SOCKS server.
-
-## Todo
-
-* Provide a mechanism to enable backends to exchange data with its
-  counterpart, so that more complicated backends can be implemented.
-* Implement a simple SOCKSv5 server as a frontend.
