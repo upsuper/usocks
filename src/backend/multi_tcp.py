@@ -8,7 +8,7 @@ from collections import defaultdict
 DEFAULT_PORT = 4194
 DEFAULT_BLOCKSIZE = 8192
 DEFAULT_NUMBER = 5
-BUFFER_SIZE = 16384
+BUFFER_SIZE = 4096
 
 class MultiTCPBackend(object):
     
@@ -29,6 +29,8 @@ class MultiTCPBackend(object):
         self.is_urgent = True
 
     def send(self, data=None, urgent=True):
+        if not data:
+            return self._continue()
         if urgent and data:
             self.is_urgent = True
         elif not urgent:
@@ -46,9 +48,6 @@ class MultiTCPBackend(object):
                 self.send_bufs[self.cur_filling] += data
                 self.filled_bytes += len(data)
                 break
-        if not self.is_urgent:
-            return True
-        return self._continue()
 
     def _continue(self):
         available = True

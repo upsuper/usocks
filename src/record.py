@@ -192,17 +192,17 @@ class RecordConnection(object):
         out_data += _hash(out_data)
         # encrypt & send data packet
         out_data = self.send_cipher.encrypt(out_data)
-        return self.backend.send(out_data, True)
+        self.backend.send(out_data, True)
 
     def _send_reset(self):
         padding_len = (block_size - extra_size) % block_size
         padding = self.random.read(padding_len)
-        return self._send_packet(b"", padding, PacketType.reset)
+        self._send_packet(b"", padding, PacketType.reset)
 
     def _send_close(self):
         padding_len = (block_size - extra_size) % block_size
         padding = self.random.read(padding_len)
-        return self._send_packet(b"", padding, PacketType.close)
+        self._send_packet(b"", padding, PacketType.close)
 
     def send_packet(self, data):
         """send_packet(data) --> bool
@@ -223,7 +223,7 @@ class RecordConnection(object):
         padding_len = data_len + extra_size
         padding_len = (block_size - padding_len) % block_size
         padding = chr(padding_len) * padding_len
-        return self._send_packet(data, padding, PacketType.data)
+        self._send_packet(data, padding, PacketType.data)
 
     def _update_buffer(self):
         length = len(self.cipher_buf)

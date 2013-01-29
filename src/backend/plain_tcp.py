@@ -13,15 +13,14 @@ class PlainTCPBackend(object):
         self.is_urgent = True
 
     def send(self, data=None, urgent=True):
+        if not data:
+            return self._continue()
         if urgent and data:
             self.is_urgent = True
         elif not urgent and not self.send_buf:
             self.is_urgent = False
         if data:
             self.send_buf += data
-        if not self.is_urgent:
-            return True
-        return self._continue()
 
     def _continue(self):
         if self.send_buf:

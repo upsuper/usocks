@@ -191,7 +191,7 @@ class TunnelConnection(object):
 
     def _send_packet(self, conn_id, control, data=b""):
         header = struct.pack(header_format, VERSION_CODE, control, conn_id)
-        self.available = self.record_conn.send_packet(header + data)
+        self.record_conn.send_packet(header + data)
 
     def continue_sending(self):
         self.available = self.record_conn.continue_sending()
