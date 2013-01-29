@@ -8,7 +8,7 @@ which can guarantee reliablity and ordering.
 
 Security:
     
-    At present, record layer uses MD5 to verify the integrity of
+    At present, record layer uses truncated MD5 to verify integrity of
     packets, and encrypts data by AES with 128-bit key in CBC mode.
 
     Since the whole packet, including hash value, is secured by AES,
@@ -16,17 +16,9 @@ Security:
 
 Packet Structure:
 
-    There are three parts of packets, which are header, data, and
-    padding. The following figure is the packet format:
+    There are four parts of packets, which are header, data, padding,
+    and digest. The following figure is the packet format:
 
-    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    |                                                               |
-    +                                                               +
-    |                                                               |
-    +                        Message Digest                         +
-    |                                                               |
-    +                                                               +
-    |                                                               |
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
     |          Data Length          |Padding Length |  Packet Type  |
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -44,9 +36,10 @@ Packet Structure:
     .                                                               .
     |                                                               |
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-
-    Message Digest  128-bit MD5 digest of the whole packet excluding
-                    the digest itself. 
+    |                                                               |
+    +                        Message Digest                         +
+    |                                                               |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
     Data Length     16-bit unsigned integer in network byte order
                     represents the length of Data field in octets.
@@ -59,6 +52,10 @@ Packet Structure:
                     content of Padding.
 
     Packet Type     8-bit packet type field. See Packet Types.
+
+    Message Digest  64-bit truncated MD5 digest of the whole packet
+                    excluding the digest itself. It is the first
+                    64 bits of the whole MD5 value.
 
 Packet Types:
 
@@ -132,12 +129,13 @@ from Crypto import Random
 from Crypto.Hash import MD5
 from Crypto.Cipher import AES
 
-digest_size = MD5.digest_size
 block_size = AES.block_size
-header_size = digest_size + struct.calcsize("!HBB")
+header_size = struct.calcsize("!HBB")
+digest_size = 8
+extra_size = header_size + digest_size
 
 def _hash(data):
-    return MD5.new(data).digest()
+    return MD5.new(data).digest()[:8]
 
 class PacketType(object):
     data    = 1
@@ -191,18 +189,18 @@ class RecordConnection(object):
 
         out_data = struct.pack("!HBB", data_len, padding_len, packet_type)
         out_data += data + padding
-        out_data = _hash(out_data) + out_data
+        out_data += _hash(out_data)
         # encrypt & send data packet
         out_data = self.send_cipher.encrypt(out_data)
         return self.backend.send(out_data, True)
 
     def _send_reset(self):
-        padding_len = (block_size - header_size) % block_size
+        padding_len = (block_size - extra_size) % block_size
         padding = self.random.read(padding_len)
         return self._send_packet(b"", padding, PacketType.reset)
 
     def _send_close(self):
-        padding_len = (block_size - header_size) % block_size
+        padding_len = (block_size - extra_size) % block_size
         padding = self.random.read(padding_len)
         return self._send_packet(b"", padding, PacketType.close)
 
@@ -218,11 +216,11 @@ class RecordConnection(object):
         """
         data_len = len(data)
         while data_len > 65535:    # the max size a packet can contain
-            new_len = 65532 # (65532 + header_size) % block_size == 0
+            new_len = 65524 # (new_len + extra_size) % block_size == 0
             self._send_packet(data[:new_len], b"", PacketType.part)
             data = data[new_len:]
             data_len -= new_len
-        padding_len = data_len + header_size
+        padding_len = data_len + extra_size
         padding_len = (block_size - padding_len) % block_size
         padding = chr(padding_len) * padding_len
         return self._send_packet(data, padding, PacketType.data)
@@ -254,10 +252,10 @@ class RecordConnection(object):
 
             # unpack header
             if not self.header_arrived:
-                header = self.plain_buf[digest_size:header_size]
+                header = self.plain_buf[:header_size]
                 self.data_len, padding_len, self.packet_type = \
                         struct.unpack("!HBB", header)
-                self.expected_length = header_size + \
+                self.expected_length = extra_size + \
                         self.data_len + padding_len
                 self.header_arrived = True
                 # check if header is valid
@@ -286,13 +284,14 @@ class RecordConnection(object):
                 break
 
             self.header_arrived = False
-            digest = self.plain_buf[:digest_size]
-            packet = self.plain_buf[digest_size:self.expected_length]
-            data = self.plain_buf[header_size:header_size + self.data_len]
+            packet_size = self.expected_length - digest_size
+            packet = self.plain_buf[:packet_size]
+            digest = self.plain_buf[packet_size:self.expected_length]
             self.plain_buf = self.plain_buf[self.expected_length:]
             # check hash
             if _hash(packet) != digest:
                 raise HashfailError()
+            data = packet[header_size:header_size + self.data_len]
             self.first_packet_checked = True
             # return packet
             if self.packet_type == PacketType.nodata:
