@@ -113,8 +113,13 @@ class TunnelClient(object):
                 self._process_listening()
             elif conn.conn_id in self.conns:
                 self._process_connection(conn)
+        written_conns = ObjectSet()
         for fileno in wlist:
-            self._process_sending(wdict[fileno])
+            conn = wdict[fileno]
+            if conn in written_conns:
+                continue
+            written_conns.add(conn)
+            self._process_sending(conn)
 
     def _process_tunnel(self):
         try:

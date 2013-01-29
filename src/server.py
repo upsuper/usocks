@@ -84,6 +84,7 @@ class TunnelServer(object):
             if e[0] == errno.EINTR:
                 return
             raise
+
         for fileno in rlist:
             conn = rdict[fileno]
             if conn is self.backend:
@@ -92,8 +93,12 @@ class TunnelServer(object):
                 self._process_tunnel(conn)
             elif conn in self.frontends:
                 self._process_frontend(conn)
+        written_conns = ObjectSet()
         for fileno in wlist:
             conn = wdict[fileno]
+            if conn in written_conns:
+                continue
+            written_conns.add(conn)
             if conn in self.tunnels:
                 conn.continue_sending()
             else:
