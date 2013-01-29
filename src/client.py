@@ -153,6 +153,12 @@ class TunnelClient(object):
         else:
             self.tunnel.send_packet(conn_id, data)
 
+    def _process_sending(self, conn):
+        if conn is self.tunnel:
+            conn.continue_sending()
+        elif conn.conn_id in self.conns:
+            conn.send()
+
     def _close_connection(self, conn_id, reset=False):
         if reset:
             self.conns[conn_id].reset()
