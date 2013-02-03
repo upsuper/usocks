@@ -201,6 +201,7 @@ class TunnelServer(object):
         for frontend in self.tunnels[tunnel].values():
             self._close_frontend(frontend)
         tunnel.record_conn.close()
+        self._process_tunnel_sending(tunnel)
 
     def _close_frontend(self, frontend, reset=False):
         if reset:
