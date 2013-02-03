@@ -8,6 +8,7 @@ client:
 
   key: &key
     preshared_key
+  address: localhost  # listen address
   port: 1080  # local port
     
 server:
