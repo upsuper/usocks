@@ -19,8 +19,7 @@ class PlainTCPBackend(object):
             self.is_urgent = True
         elif not urgent and not self.send_buf:
             self.is_urgent = False
-        if data:
-            self.send_buf += data
+        self.send_buf += data
 
     def _continue(self):
         if self.send_buf:
