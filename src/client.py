@@ -90,6 +90,12 @@ class TunnelClient(object):
         for conn in self.conns.itervalues():
             conn.close()
         self.record_conn.close()
+        while True:
+            wlist = self.record_conn.get_wlist()
+            if not wlist:
+                break
+            select.select([], wlist, [])
+            self.record_conn.continue_sending()
         self.backend.close()
 
     def _process(self):

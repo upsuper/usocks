@@ -66,9 +66,19 @@ class TunnelServer(object):
                         .format(exc_type, str(e), repr(exc_tb))
                 error(msg, 'tunnel', None)
         # close connections
+        self.backend.close()
         for tunnel in self.tunnels.keys():
             self._close_tunnel(tunnel)
-        self.backend.close()
+        while True:
+            wlist, wdict = get_select_list(
+                    'get_wlist', self.tunnels.iterkeys())
+            if not wlist:
+                break
+            _, wlist, _ = select.select([], wlist, [])
+            for fileno in wlist:
+                conn = wdict[fileno]
+                if conn in self.tunnels:
+                    self._process_tunnel_sending(conn)
 
     def _process(self):
         rlist, rdict = get_select_list('get_rlist',
@@ -100,7 +110,7 @@ class TunnelServer(object):
                 continue
             written_conns.add(conn)
             if conn in self.tunnels:
-                conn.continue_sending()
+                self._process_tunnel_sending(conn)
             else:
                 conn.send()
 
@@ -180,12 +190,17 @@ class TunnelServer(object):
             tunnel.close_connection(conn_id)
             self._close_frontend(frontend)
 
+    def _process_tunnel_sending(self, tunnel):
+        tunnel.continue_sending()
+        if tunnel.record_conn.closed:
+            if not tunnel.get_wlist():
+                tunnel.record_conn.backend.close()
+                del self.tunnels[tunnel]
+
     def _close_tunnel(self, tunnel):
         for frontend in self.tunnels[tunnel].values():
             self._close_frontend(frontend)
         tunnel.record_conn.close()
-        tunnel.record_conn.backend.close()
-        del self.tunnels[tunnel]
 
     def _close_frontend(self, frontend, reset=False):
         if reset:
