@@ -205,14 +205,11 @@ class RecordConnection(object):
         self._send_packet(b"", padding, PacketType.close)
 
     def send_packet(self, data):
-        """send_packet(data) --> bool
+        """send_packet(data) --> None
 
-        Send packet to record layer. Return False if buffer of backend
-        has been filled, and caller should not send more data. Return
-        True otherwise. Whether or not sending buffer is available,
-        caller should call get_wlist() for file descriptors waiting
-        for writing, and call continue_sending() when one of them are
-        selected to continue.
+        Send packet to record layer. Caller must call get_wlist() for
+        file descriptors waiting for writing, and call
+        continue_sending() when one of them are selected to continue.
         """
         data_len = len(data)
         while data_len > 65535:    # the max size a packet can contain
@@ -351,7 +348,8 @@ class RecordConnection(object):
     def continue_sending(self):
         """continue_sending() --> bool
 
-        The return value has the same meaning with send_packet().
+        The return value means whether the record layer is ready for
+        more data to send.
         """
         return self.backend.send()
 
