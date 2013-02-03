@@ -68,10 +68,15 @@ class Connection(object):
 
 class TunnelClient(object):
 
+    port = 8000
+
     def __init__(self, config):
         self.local_conn = Connection(socket.socket(), -1)
+        # read config
+        if 'port' in config:
+            self.port = config['port']
         # initialize local port
-        self.local_conn.bind(("", config['port']))
+        self.local_conn.bind(("", self.port))
         self.local_conn.listen(10)
         # initialize backend & record layer
         Backend = import_backend(config).ClientBackend
