@@ -80,6 +80,8 @@ class TunnelClient(object):
         if 'port' in config:
             self.port = config['port']
         # initialize local port
+        self.local_conn.conn.setsockopt(
+                socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.local_conn.bind((self.address, self.port))
         self.local_conn.listen(10)
         # initialize backend & record layer

@@ -90,6 +90,7 @@ class ServerBackend(object):
 
         # initialize socket
         self.conn = socket.socket()
+        self.conn.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.conn.bind((self.address, self.port))
         self.conn.listen(10)
 
