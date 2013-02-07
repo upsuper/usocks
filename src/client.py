@@ -6,6 +6,7 @@ from __future__ import print_function, unicode_literals
 import sys
 import yaml
 import errno
+import struct
 import socket
 import signal
 import select
@@ -53,7 +54,7 @@ class Connection(object):
 
     def reset(self):
         self.conn.setsockopt(socket.SOL_SOCKET,
-                socket.SO_LINGER, struct.pack("ii", 1, 0))
+                socket.SO_LINGER, struct.pack(b"ii", 1, 0))
         self.close()
 
     def get_rlist(self):
