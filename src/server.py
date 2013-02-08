@@ -162,7 +162,7 @@ class TunnelServer(object):
             try:
                 frontend = self.new_frontend()
             except FrontendUnavailableError:
-                error(e.message, 'frontend', tunnel.address)
+                error("unavailable", 'frontend', tunnel.address)
                 tunnel.reset_connection(conn_id)
                 return
             frontends[conn_id] = frontend
