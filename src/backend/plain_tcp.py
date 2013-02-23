@@ -28,6 +28,8 @@ class PlainTCPBackend(object):
             except socket.error as e:
                 if e.errno == errno.EWOULDBLOCK:
                     sent = 0
+                elif e.errno == errno.EPIPE:
+                    sent = len(self.send_buf)
                 else:
                     raise
             if sent:

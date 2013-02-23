@@ -132,8 +132,6 @@ class TunnelServer(object):
             self._close_tunnel(tunnel)
             info("disconnected", 'record', tunnel.address)
         except record.CriticalException as e:
-            self._close_tunnel(tunnel)
-
             # logging message
             if isinstance(e, record.HashfailError):
                 msg = "detect a wrong hash"
@@ -149,6 +147,8 @@ class TunnelServer(object):
                 msg = "detect a critical exception"
             # log the exception
             warning(msg, 'record', tunnel.address)
+
+            self._close_tunnel(tunnel)
 
     def _process_tunnel_packet(self, tunnel, conn_id, control, data):
         frontends = self.tunnels[tunnel]
