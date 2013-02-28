@@ -66,9 +66,7 @@ class ClientBackend(PlainTCPBackend):
         if 'port' in opts:
             self.port = opts['port']
         # initialize socket
-        self.conn = socket.socket()
-        # TODO make connect non-blocking
-        self.conn.connect((self.server, self.port))
+        self.conn = socket.create_connection((self.server, self.port))
         self.conn.setblocking(0)
 
 class ServerInstance(PlainTCPBackend):
@@ -91,7 +89,8 @@ class ServerBackend(object):
             self.port = opts['port']
 
         # initialize socket
-        self.conn = socket.socket()
+        self.conn = socket.socket(socket.AF_INET6
+                if socket.has_ipv6 else socket.AF_INET)
         self.conn.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.conn.bind((self.address, self.port))
         self.conn.listen(10)
