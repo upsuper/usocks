@@ -17,9 +17,8 @@ class FrontendServer(object):
             self.port = opts['port']
         
         # initialize socket
-        self.conn = socket.socket()
         try:
-            self.conn.connect((self.server, self.port))
+            self.conn = socket.create_connection((self.server, self.port))
         except socket.error as e:
             if e.errno == errno.ECONNREFUSED:
                 msg = "connection to {0}:{1} is refused" \
